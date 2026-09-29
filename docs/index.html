@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Supplier Quotation API — документация</title>
+  <meta name="description" content="Единый API проценки поставщиков автозапчастей: запросы, ответы, статусы, особенности каждого поставщика.">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.17.14/swagger-ui.css" integrity="sha384-wxLW6kwyHktdDGr6Pv1zgm/VGJh99lfUbzSn6HNHBENZlCN7W602k9VkGdxuFvPn" crossorigin="anonymous">
+  <style>
+    body { margin: 0; background: #fafafa; }
+    .banner { background: #1b2a41; color: #e8eef7; padding: 10px 20px; font: 14px/1.5 system-ui, sans-serif; }
+    .banner a { color: #8fc1ff; }
+  </style>
+</head>
+<body>
+  <div class="banner">
+    Это справочная копия документации: запросы отсюда не отправляются.
+    Интерактивная версия с кнопкой «Try it out» — на
+    <a href="https://quotation.mpsuper.ru/swagger/index.html">quotation.mpsuper.ru/swagger</a>,
+    исходники — в <a href="https://github.com/EvgeniBondarev/Supplier-Quotation-Api">репозитории</a>,
+    спецификация — <a href="openapi.json">openapi.json</a>.
+  </div>
+  <div id="swagger-ui"></div>
+  <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.17.14/swagger-ui-bundle.js" integrity="sha384-wmyclcVGX/WhUkdkATwhaK1X1JtiNrr2EoYJ+diV3vj4v6OC5yCeSu+yW13SYJep" crossorigin="anonymous"></script>
+  <script>
+    // Документ строится из кода сервиса и лежит рядом (docs/openapi.json). Адрес сервера подставляем боевой.
+    fetch('openapi.json').then(function (r) { return r.json(); }).then(function (spec) {
+      spec.servers = [{ url: 'https://quotation.mpsuper.ru', description: 'Боевой сервер' }];
+      SwaggerUIBundle({
+        spec: spec,
+        dom_id: '#swagger-ui',
+        deepLinking: true,
+        docExpansion: 'list',
+        defaultModelsExpandDepth: 1,
+        supportedSubmitMethods: [],
+        presets: [SwaggerUIBundle.presets.apis]
+      });
+    });
+  </script>
+</body>
+</html>
