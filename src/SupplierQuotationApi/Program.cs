@@ -4,6 +4,8 @@ using SupplierQuotationApi.Infrastructure;
 using SupplierQuotationApi.Providers.Armtek;
 using SupplierQuotationApi.Providers.Avd;
 using SupplierQuotationApi.Providers.Berg;
+using SupplierQuotationApi.Providers.MlAuto;
+using SupplierQuotationApi.Providers.Motex;
 using SupplierQuotationApi.Providers.FavoritParts;
 using SupplierQuotationApi.Providers.ForumAuto;
 using SupplierQuotationApi.Providers.ShateM;
@@ -39,6 +41,8 @@ builder.Services.AddFavoritParts(builder.Configuration);
 builder.Services.AddForumAuto(builder.Configuration);
 builder.Services.AddAvd(builder.Configuration);
 builder.Services.AddBerg(builder.Configuration);
+builder.Services.AddMotex(builder.Configuration);
+builder.Services.AddMlAuto(builder.Configuration);
 
 var app = builder.Build();
 

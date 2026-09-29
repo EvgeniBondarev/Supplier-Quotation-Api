@@ -115,12 +115,21 @@ public sealed class QuotationService
         {
             ProviderKey = provider.Key,
             ProviderName = provider.Name,
-            LogoUrl = provider.LogoFile is null || logoBaseUrl is null ? null : $"{logoBaseUrl}/logos/{provider.LogoFile}",
+            LogoUrl = ResolveLogoUrl(provider.LogoFile, logoBaseUrl),
             AccountLogin = provider.AccountLogin,
             Status = status,
             Error = error,
             DurationMs = stopwatch.ElapsedMilliseconds,
             Offers = offers
         };
+    }
+
+    /// <summary>Локальный файл из wwwroot/logos или готовая внешняя ссылка (http/https), если логотип хранится у поставщика.</summary>
+    public static string? ResolveLogoUrl(string? logoFile, string? logoBaseUrl)
+    {
+        if (string.IsNullOrWhiteSpace(logoFile)) return null;
+        if (logoFile.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+            logoFile.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) return logoFile;
+        return logoBaseUrl is null ? null : $"{logoBaseUrl}/logos/{logoFile}";
     }
 }

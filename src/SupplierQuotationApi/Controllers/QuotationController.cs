@@ -56,7 +56,7 @@ public sealed class QuotationController : ControllerBase
     public IActionResult Providers() => Ok(_service.Providers.Select(p => new
     {
         p.Key, p.Name, p.IsEnabled, p.AccountLogin,
-        LogoUrl = p.LogoFile is null ? null : $"{BaseUrl}/logos/{p.LogoFile}"
+        LogoUrl = QuotationService.ResolveLogoUrl(p.LogoFile, BaseUrl)
     }));
 
     private BadRequestObjectResult? Unknown(QuotationRequest request)
