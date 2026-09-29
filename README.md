@@ -9,7 +9,7 @@
 
 - .NET 8, ASP.NET Core Web API, без собственной БД (кэш в памяти)
 - 22 поставщика на 14 разных API: REST, SOAP, HTML-портал (несколько аккаунтов одного API работают одной реализацией)
-- 198 автотестов
+- 207 автотестов
 
 ## Содержание
 
@@ -20,6 +20,7 @@
 - [Единая модель предложения](#единая-модель-предложения)
 - [Поставщики](#поставщики)
 - [Алиасы производителей](#алиасы-производителей)
+- [Docker](#docker)
 - [Конфигурация](#конфигурация)
 - [Как добавить поставщика](#как-добавить-поставщика)
 - [Безопасность](#безопасность)
@@ -66,7 +67,7 @@ git clone https://github.com/EvgeniBondarev/Supplier-Quotation-Api.git
 cd Supplier-Quotation-Api
 
 cp .env.example .env          # заполнить значения (секреты хранятся только здесь)
-dotnet test                   # 198 тестов
+dotnet test                   # 207 тестов
 dotnet run --project src/SupplierQuotationApi
 ```
 
@@ -88,7 +89,8 @@ ASPNETCORE_ENVIRONMENT=Production ASPNETCORE_URLS=http://localhost:5099 \
 |---|---|---|
 | `POST` | `/api/quotations` | Проценка одним ответом |
 | `POST` | `/api/quotations/stream` | Та же проценка потоком NDJSON: строка на поставщика по мере готовности |
-| `GET` | `/api/quotations/providers` | Список поставщиков, их статус включения, логотипы |
+| `POST`, `GET` | `/api/quotations/providers/{providerKey}` | Проценка у **одного** поставщика, не дожидаясь остальных |
+| `GET` | `/api/quotations/providers` | Список поставщиков, их статус включения, логотипы, паспорта |
 | `GET` | `/health` | Проверка живости |
 | `GET` | `/swagger` | Документация (см. [Swagger и OpenAPI](#swagger-и-openapi)) |
 
@@ -168,6 +170,31 @@ curl -s -X POST http://localhost:5099/api/quotations \
   ]
 }
 ```
+
+### Один поставщик, не ожидая остальных
+
+`POST /api/quotations/providers/{providerKey}` (и то же через `GET` с параметрами в адресе) возвращает результат **одного** поставщика:
+тот же объект `ProviderQuotation`, что и элемент `providers[]` общего ответа. Запрос нужен, когда результаты показываются по мере готовности:
+вызовите его для каждого поставщика параллельно и выводите ответы по мере прихода, не дожидаясь самого медленного (обычно ZZap).
+
+```bash
+curl -s -X POST http://localhost:5141/api/quotations/providers/ShateM \
+  -H "X-Api-Key: $APP_API_KEY" -H "Content-Type: application/json" \
+  -d '{"article":"K1223A","brand":"Filtron"}'
+
+# то же через GET
+curl -s -H "X-Api-Key: $APP_API_KEY" \
+  "http://localhost:5141/api/quotations/providers/ShateM?article=K1223A&brand=Filtron"
+```
+
+- Тело POST: `article`, `brand`, `includeAnalogs` (списка `providers` нет, поставщик в адресе). Ключ поставщика не зависит от регистра.
+- Кэш результатов и очередь ZZap **общие** с `POST /api/quotations`: после одиночных запросов общий запрос по тем же данным отвечает из кэша за миллисекунды,
+  и поставщик не вызывается второй раз.
+- Выключенный поставщик, таймаут и сбой приходят статусом `Disabled`, `Timeout`, `Error`, как и в общем ответе (HTTP 200).
+- `404` — неизвестный ключ поставщика, `400` — пустой артикул.
+
+Пример параллельной проценки по шести поставщикам (K1223A / Filtron): результаты появлялись через 0,6 с (Фаворит), 0,7 с (Берг), 1,1 с (АВД),
+1,3 с (Nikei), 2,9 с (ZZap) и 3,1 с (Шате-М), тогда как общий запрос отдаёт всё только после самого медленного.
 
 ### Статусы поставщика
 
@@ -335,6 +362,27 @@ CREATE USER 'quotation_ro'@'%' IDENTIFIED BY '<пароль>';
 GRANT SELECT ON ST2.OneCProducerAliases TO 'quotation_ro'@'%';
 ```
 
+## Docker
+
+В репозитории есть `Dockerfile` (многоэтапная сборка, образ около 360 МБ) и `docker-compose.yml`.
+
+```bash
+cp .env.example .env                 # заполнить значения
+docker compose up -d --build         # сервис на http://localhost:8080
+PORT=9000 docker compose up -d       # другой порт
+docker compose logs -f
+```
+
+- Секреты в образ не попадают: `.env` исключён в `.dockerignore`, значения передаются при запуске (`env_file`). Кавычки вокруг значений
+  в `.env` compose снимает сам; у `docker run --env-file` кавычки остаются в значениях, поэтому без compose монтируйте файл:
+  `docker run -p 8080:8080 -v "$PWD/.env:/app/.env:ro" supplier-quotation-api`.
+- Контейнер работает не от root (пользователь `app`), файловая система только для чтения, все capabilities сброшены.
+- Проверка живости встроена в образ (`HEALTHCHECK` на `/health`), статус виден в `docker ps`.
+- Окружение по умолчанию Production: Swagger скрыт, включается `APP__SWAGGERENABLED=true`. Редирект на https в Production выключен: TLS снимается на прокси.
+- За nginx или другим прокси раскомментируйте `ASPNETCORE_FORWARDEDHEADERS_ENABLED` в compose-файле, иначе `logoUrl` в ответах будет с внутренним адресом.
+- Контейнеру нужен доступ к API поставщиков и, для алиасов производителей, к базе Studio2 (`STUDIO2DB__CONNECTIONSTRING`). МоТехС и Микадо
+  разрешают доступ по IP: адрес должен быть внешним адресом сервера, где запущен контейнер.
+
 ## Конфигурация
 
 Все секреты и настройки лежат в одном файле `.env`. Файл не попадает в репозиторий, шаблон без значений — `.env.example`.
@@ -415,7 +463,7 @@ public interface IQuotationProvider
 
 ```bash
 dotnet build          # должно быть 0 предупреждений
-dotnet test           # 198 тестов: ядро, маппинг и разбор ответов каждого поставщика, клиенты на заглушках, Swagger
+dotnet test           # 207 тестов: ядро, маппинг и разбор ответов каждого поставщика, клиенты на заглушках, Swagger
 ```
 
 Структура:

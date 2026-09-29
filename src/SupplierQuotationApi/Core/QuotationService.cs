@@ -28,6 +28,18 @@ public sealed class QuotationService
     public IReadOnlyList<string> FindUnknown(IEnumerable<string>? keys) =>
         keys?.Where(k => !_providers.ContainsKey(k)).ToList() ?? [];
 
+    /// <summary>Опрашивает одного поставщика, не дожидаясь остальных. <c>null</c> — такого ключа нет.
+    /// Использует тот же кэш результатов, единую очередь (ZZap) и ту же обработку ошибок, что и общая проценка:
+    /// выключенный поставщик, таймаут и сбой приходят статусом, а не исключением.</summary>
+    public async Task<ProviderQuotation?> QuoteSingleAsync(string providerKey, ProviderQuotationRequest request,
+        string? logoBaseUrl, CancellationToken cancellationToken)
+    {
+        if (!_providers.TryGetValue(providerKey, out var provider)) return null;
+
+        var search = new QuotationSearch(request.Article.Trim(), request.Brand?.Trim(), request.IncludeAnalogs);
+        return await QuoteProviderAsync(provider, search, logoBaseUrl, cancellationToken);
+    }
+
     /// <summary>Дожидается всех поставщиков и возвращает общий ответ.</summary>
     public async Task<QuotationResponse> QuoteAsync(QuotationRequest request, string? logoBaseUrl,
         CancellationToken cancellationToken)

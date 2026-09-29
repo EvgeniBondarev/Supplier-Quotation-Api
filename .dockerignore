@@ -1,0 +1,25 @@
+# Секреты: ни в образ, ни в контекст сборки
+.env
+.env.*
+!.env.example
+
+# Служебное и лишнее для сборки
+.git
+.gitignore
+.github
+.vs
+.idea
+.claude
+**/bin
+**/obj
+**/*.user
+**/*.log
+TestResults
+
+# Тесты и документация для образа не нужны
+tests
+docs
+*.md
+Dockerfile
+docker-compose*.yml
+.dockerignore

@@ -42,7 +42,7 @@ public class OpenApiTests
 
         Assert.Equal("Supplier Quotation API", (string)doc["info"]!["title"]!);
         var paths = doc["paths"]!.AsObject().Select(p => p.Key).Order().ToArray();
-        Assert.Equal(["/api/quotations", "/api/quotations/providers", "/api/quotations/stream"], paths);
+        Assert.Equal(["/api/quotations", "/api/quotations/providers", "/api/quotations/providers/{providerKey}", "/api/quotations/stream"], paths);
 
         var scheme = doc["components"]!["securitySchemes"]!["ApiKey"]!;
         Assert.Equal("apiKey", (string)scheme["type"]!);
@@ -84,6 +84,30 @@ public class OpenApiTests
         Assert.Contains("Разделители и регистр", (string)article["description"]!);
         Assert.Equal("K1223A", (string)article["example"]!);
         Assert.Contains("Итог опроса", (string)doc["components"]!["schemas"]!["QuotationStatus"]!["description"]!);
+    }
+
+    [Fact]
+    public async Task Document_SingleProviderOperations_ListKeysAndExamples()
+    {
+        using var factory = Factory();
+        var doc = await LoadDocumentAsync(factory);
+        var item = doc["paths"]!["/api/quotations/providers/{providerKey}"]!;
+
+        Assert.NotNull(item["get"]);
+        Assert.NotNull(item["post"]);
+        foreach (var method in new[] { "get", "post" })
+        {
+            var op = item[method]!;
+            var key = op["parameters"]!.AsArray().Single(p => (string)p!["name"]! == "providerKey")!;
+            Assert.Equal("path", (string)key["in"]!);
+            Assert.Equal(ProviderCatalog.All.Count, key["schema"]!["enum"]!.AsArray().Count);
+            Assert.NotNull(op["responses"]!["404"]);
+            Assert.Equal(["error", "noOffers", "ok"], op["responses"]!["200"]!["content"]!["application/json"]!["examples"]!.AsObject().Select(x => x.Key).Order().ToArray());
+        }
+
+        var queryNames = item["get"]!["parameters"]!.AsArray().Select(p => (string)p!["name"]!).Order().ToArray();
+        Assert.Equal(["article", "brand", "includeAnalogs", "providerKey"], queryNames);
+        Assert.Equal(["byBrand", "noBrand", "withAnalogs"], item["post"]!["requestBody"]!["content"]!["application/json"]!["examples"]!.AsObject().Select(x => x.Key).Order().ToArray());
     }
 
     [Fact]

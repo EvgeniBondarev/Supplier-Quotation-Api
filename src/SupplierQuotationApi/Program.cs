@@ -66,7 +66,8 @@ var app = builder.Build();
 if (app.Environment.IsDevelopment() || builder.Configuration.GetValue<bool>($"{AppOptions.Section}:SwaggerEnabled"))
     app.UseApiDocumentation();
 
-app.UseHttpsRedirection();
+// В контейнере и за прокси TLS снимается снаружи: редирект на https нужен только при локальной разработке.
+if (app.Environment.IsDevelopment()) app.UseHttpsRedirection();
 app.UseStaticFiles();
 app.UseMiddleware<ApiKeyMiddleware>();
 app.MapHealthChecks("/health");

@@ -15,6 +15,7 @@ public sealed class ContractSchemaFilter : ISchemaFilter
 
         if (type == typeof(QuotationRequest)) schema.Example = OpenApiAnyConverter.From(SwaggerExamples.RequestByBrand, ignoreNulls: true);
         else if (type == typeof(QuotationResponse)) schema.Example = OpenApiAnyConverter.From(SwaggerExamples.ResponseOk);
+        else if (type == typeof(ProviderQuotationRequest)) schema.Example = OpenApiAnyConverter.From(SwaggerExamples.SingleByBrand, ignoreNulls: true);
         else if (type == typeof(ProviderQuotation)) schema.Example = OpenApiAnyConverter.From(SwaggerExamples.ProviderOk);
         else if (type == typeof(ProviderInfo)) schema.Example = OpenApiAnyConverter.From(SwaggerExamples.ProviderInfoShateM);
         else if (type == typeof(Money)) schema.Example = OpenApiAnyConverter.From(new Money(82.62m, "BYN"));
@@ -94,6 +95,17 @@ public sealed class QuotationOperationFilter : IOperationFilter
             KeepOnly(operation, "400", Json);       // ошибки приходят до начала потока обычным JSON
             KeepOnly(operation, "401", Json);
         }
+        else if (path.Contains("providers/{providerKey}", StringComparison.OrdinalIgnoreCase))
+        {
+            if (isPost) AddSingleRequestExamples(operation);
+            AddResponseExamples(operation, "200", Json, new()
+            {
+                ["ok"] = Example("Есть предложения", "Результат одного поставщика: тот же объект, что элемент `providers[]` общего ответа.", SwaggerExamples.ProviderOk),
+                ["noOffers"] = Example("Предложений нет", "Запрос выполнен, у поставщика нет товара.", SwaggerExamples.ProviderNoOffers),
+                ["error"] = Example("Ошибка поставщика", "Ошибка приходит со статусом `Error` и текстом, HTTP-код остаётся 200.", SwaggerExamples.ProviderError)
+            });
+            AddNotFoundExample(operation);
+        }
         else if (path.EndsWith("providers", StringComparison.OrdinalIgnoreCase))
         {
             AddResponseExamples(operation, "200", Json, new()
@@ -110,6 +122,27 @@ public sealed class QuotationOperationFilter : IOperationFilter
     {
         if (!operation.Responses.TryGetValue(code, out var response)) return;
         foreach (var key in response.Content.Keys.Where(k => k != contentType).ToList()) response.Content.Remove(key);
+    }
+
+    private static void AddSingleRequestExamples(OpenApiOperation operation)
+    {
+        if (operation.RequestBody?.Content.TryGetValue(Json, out var media) != true) return;
+        media!.Examples = new Dictionary<string, OpenApiExample>
+        {
+            ["byBrand"] = Example("Артикул и бренд", "Основной сценарий.", SwaggerExamples.SingleByBrand),
+            ["withAnalogs"] = Example("С аналогами", "Флаг учитывают Шате-М, Армтек, Фаворит (с брендом), Форум-Авто и Берг.", SwaggerExamples.SingleWithAnalogs),
+            ["noBrand"] = Example("Без бренда", "ML-Auto, Микадо и ZZap ответят статусом `Error` «укажите бренд».", SwaggerExamples.SingleNoBrand)
+        };
+    }
+
+    private static void AddNotFoundExample(OpenApiOperation operation)
+    {
+        if (!operation.Responses.TryGetValue("404", out var response)) return;
+        foreach (var media in response.Content.Values)
+            media.Examples = new Dictionary<string, OpenApiExample>
+            {
+                ["unknownProvider"] = Example("Неизвестный поставщик", "Допустимые ключи — в `GET /api/quotations/providers`.", SwaggerExamples.NotFound)
+            };
     }
 
     private static void AddRequestExamples(OpenApiOperation operation)
@@ -182,6 +215,21 @@ public sealed class QuotationOperationFilter : IOperationFilter
     {
         Summary = summary, Description = description, Value = OpenApiAnyConverter.From(value, ignoreNulls: value is QuotationRequest)
     };
+}
+
+/// <summary>Параметр пути <c>providerKey</c>: допустимые ключи из каталога и пример.</summary>
+public sealed class ProviderKeyParameterFilter : IParameterFilter
+{
+    public void Apply(OpenApiParameter parameter, ParameterFilterContext context)
+    {
+        if (parameter.Name != "providerKey") return;
+
+        parameter.Description = "Ключ поставщика из `GET /api/quotations/providers`. Регистр не важен.";
+        parameter.Schema.Enum = ProviderCatalog.All.Keys
+            .OrderBy(k => k, StringComparer.OrdinalIgnoreCase)
+            .Select(k => (IOpenApiAny)new OpenApiString(k)).ToList();
+        parameter.Example = new OpenApiString("ShateM");
+    }
 }
 
 /// <summary>Описание тегов и списка поставщиков в шапке документа.</summary>

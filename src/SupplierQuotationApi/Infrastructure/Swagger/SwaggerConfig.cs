@@ -49,6 +49,7 @@ public static class SwaggerConfig
             options.SchemaFilter<ContractSchemaFilter>();
             options.SchemaFilter<QuotationStatusSchemaFilter>();
             options.OperationFilter<QuotationOperationFilter>();
+            options.ParameterFilter<ProviderKeyParameterFilter>();
             options.DocumentFilter<DocumentInfoFilter>();
         });
         return services;
@@ -82,8 +83,11 @@ public static class SwaggerConfig
 
             1. Передайте ключ в заголовке `X-Api-Key` (кнопка **Authorize**).
             2. `POST /api/quotations` — ответ одним JSON, либо `POST /api/quotations/stream` — поток NDJSON по мере готовности.
-            3. Список поставщиков и их особенности — `GET /api/quotations/providers`.
-            4. Проверка живости — `GET /health` (без ключа).
+            3. **Не хотите ждать всех** — спросите поставщика отдельно: `POST /api/quotations/providers/{providerKey}`
+               (или `GET` с параметрами в адресе). Вызовите его для каждого поставщика параллельно и показывайте ответы по мере прихода.
+               Кэш и очередь ZZap общие с общей проценкой.
+            4. Список поставщиков и их особенности — `GET /api/quotations/providers`.
+            5. Проверка живости — `GET /health` (без ключа).
 
             ## Что важно знать
 

@@ -90,6 +90,70 @@ public sealed class QuotationController : ControllerBase
         }
     }
 
+    /// <summary>Проценка у одного поставщика, не дожидаясь остальных.</summary>
+    /// <remarks>
+    /// Возвращает результат одного поставщика (объект `ProviderQuotation`, такой же, как элемент `providers[]` общего ответа).
+    /// Запрос нужен, когда результаты показываются по мере готовности: вызовите его для каждого поставщика параллельно
+    /// и выводите ответы по мере прихода, не ожидая самого медленного (например, ZZap отвечает по очереди).
+    ///
+    /// Ключ поставщика не зависит от регистра. Кэш результатов и очередь ZZap общие с `POST /api/quotations`: если тот же артикул
+    /// уже искали в последнюю минуту, ответ придёт мгновенно, а повторный общий запрос не пойдёт к поставщику второй раз.
+    ///
+    /// Как и в общей проценке, **HTTP 200 не означает наличия предложений**: смотрите `status`. Выключенный поставщик,
+    /// таймаут и сбой приходят статусом `Disabled`, `Timeout`, `Error` с текстом в `error`.
+    /// </remarks>
+    /// <param name="providerKey">Ключ поставщика из `GET /api/quotations/providers`.</param>
+    /// <param name="request">Артикул, бренд и флаг аналогов.</param>
+    /// <response code="200">Результат поставщика. Проверяйте `status`.</response>
+    /// <response code="400">Пустой артикул.</response>
+    /// <response code="401">Не передан заголовок `X-Api-Key` или он неверный.</response>
+    /// <response code="404">Такого поставщика нет.</response>
+    [HttpPost("providers/{providerKey}")]
+    [Consumes(MediaTypeNames.Application.Json)]
+    [Produces(MediaTypeNames.Application.Json)]
+    [ProducesResponseType<ProviderQuotation>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public Task<ActionResult<ProviderQuotation>> QuoteProvider(string providerKey, [FromBody] ProviderQuotationRequest request,
+        CancellationToken cancellationToken) => QuoteSingleAsync(providerKey, request, cancellationToken);
+
+    /// <summary>Проценка у одного поставщика: то же, что POST, параметры в адресе.</summary>
+    /// <remarks>
+    /// Удобно для проверки из браузера и для простых клиентов: `GET /api/quotations/providers/ShateM?article=K1223A&amp;brand=Filtron`.
+    /// Поведение, кэш и ответы те же, что у `POST /api/quotations/providers/{providerKey}`.
+    /// </remarks>
+    /// <param name="providerKey">Ключ поставщика из `GET /api/quotations/providers`.</param>
+    /// <param name="article">Артикул детали; разделители и регистр не важны (`K1223A` = `K 1223A`).</param>
+    /// <param name="brand">Производитель. Обязателен для ML-Auto (BY и RU), Микадо и ZZap; написание может отличаться от каталога поставщика.</param>
+    /// <param name="includeAnalogs">Включать кроссы и аналоги; учитывают не все поставщики (`supportsAnalogs`).</param>
+    /// <response code="200">Результат поставщика. Проверяйте `status`.</response>
+    /// <response code="400">Пустой артикул.</response>
+    /// <response code="401">Не передан заголовок `X-Api-Key` или он неверный.</response>
+    /// <response code="404">Такого поставщика нет.</response>
+    [HttpGet("providers/{providerKey}")]
+    [Produces(MediaTypeNames.Application.Json)]
+    [ProducesResponseType<ProviderQuotation>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public Task<ActionResult<ProviderQuotation>> QuoteProviderByQuery(
+        string providerKey,
+        [FromQuery, System.ComponentModel.DataAnnotations.Required, System.ComponentModel.DataAnnotations.StringLength(100, MinimumLength = 1)] string article,
+        [FromQuery, System.ComponentModel.DataAnnotations.StringLength(100)] string? brand,
+        [FromQuery] bool includeAnalogs,
+        CancellationToken cancellationToken) =>
+        QuoteSingleAsync(providerKey, new ProviderQuotationRequest { Article = article, Brand = brand, IncludeAnalogs = includeAnalogs }, cancellationToken);
+
+    private async Task<ActionResult<ProviderQuotation>> QuoteSingleAsync(string providerKey, ProviderQuotationRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await _service.QuoteSingleAsync(providerKey, request, BaseUrl, cancellationToken);
+        return result is null
+            ? NotFound(new ProblemDetails { Title = $"Неизвестный поставщик: {providerKey}", Status = StatusCodes.Status404NotFound })
+            : Ok(result);
+    }
+
     /// <summary>Подключённые поставщики и их особенности.</summary>
     /// <remarks>
     /// Для каждого поставщика: ключ для поля `providers`, включён ли он (заполнены ли настройки в `.env`), логин учётной записи,

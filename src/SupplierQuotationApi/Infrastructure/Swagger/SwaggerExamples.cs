@@ -16,6 +16,12 @@ public static class SwaggerExamples
 
     public static readonly QuotationRequest RequestNoBrand = new() { Article = "K1223A" };
 
+    public static readonly ProviderQuotationRequest SingleByBrand = new() { Article = "K1223A", Brand = "Filtron" };
+
+    public static readonly ProviderQuotationRequest SingleWithAnalogs = new() { Article = "K1223A", Brand = "Filtron", IncludeAnalogs = true };
+
+    public static readonly ProviderQuotationRequest SingleNoBrand = new() { Article = "K1223A" };
+
     private static QuotationOffer ShateMOffer => new()
     {
         OfferId = "035C2148256848A9336DCAFF21E9FAA6…",
@@ -86,6 +92,14 @@ public static class SwaggerExamples
         ]
     };
 
+    /// <summary>Пример результата одного поставщика с ошибкой: ZZap без бренда.</summary>
+    public static readonly ProviderQuotation ProviderError = Provider("ZZapMoscow", "ZZap Москва", "http://localhost:5099/logos/zzap.svg", "api-key",
+        QuotationStatus.Error, 17, "ZZap ищет только по паре артикул + бренд: укажите бренд.");
+
+    /// <summary>Пример результата одного поставщика без предложений.</summary>
+    public static readonly ProviderQuotation ProviderNoOffers = Provider("Berg", "Берг", "http://localhost:5099/logos/berg.png", "api-key",
+        QuotationStatus.NoOffers, 118);
+
     /// <summary>Разные исходы у разных поставщиков в одном ответе: ошибка одного не ломает остальных.</summary>
     public static readonly QuotationResponse ResponseMixed = new()
     {
@@ -125,6 +139,9 @@ public static class SwaggerExamples
     };
 
     public static readonly IReadOnlyList<ProviderInfo> ProviderList = [ProviderInfoShateM, ProviderInfoZZap];
+
+    /// <summary>Пример 404: такого поставщика нет.</summary>
+    public static readonly object NotFound = new { title = "Неизвестный поставщик: Foo", status = 404 };
 
     /// <summary>Пример 400: неизвестный ключ поставщика.</summary>
     public static readonly object BadRequest = new { title = "Неизвестные поставщики: Foo, Bar", status = 400 };

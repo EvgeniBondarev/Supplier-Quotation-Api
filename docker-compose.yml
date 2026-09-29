@@ -1,0 +1,23 @@
+# Запуск: docker compose up -d --build
+# Секреты берутся из .env рядом с этим файлом (шаблон — .env.example). Файл в образ не копируется.
+services:
+  supplier-quotation-api:
+    build: .
+    image: supplier-quotation-api:latest
+    container_name: supplier-quotation-api
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      # За обратным прокси (nginx и т.п.): учитывать X-Forwarded-Proto/Host, чтобы logoUrl в ответах был внешним адресом.
+      # ASPNETCORE_FORWARDEDHEADERS_ENABLED: "true"
+      # Swagger вне Development скрыт; включить: APP__SWAGGERENABLED: "true"
+    ports:
+      - "${PORT:-8080}:8080"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
