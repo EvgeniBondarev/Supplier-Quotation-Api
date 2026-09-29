@@ -11,6 +11,9 @@ public sealed class ArmtekProvider : IQuotationProvider
 {
     private const int MaxBrandCandidates = 6;
     private static readonly TimeSpan ReferenceTtl = TimeSpan.FromMinutes(30);
+    /// <summary>Справочник складов Armtek весит до 8 МБ: на медленном канале он грузится десятки секунд. Проценку он не блокирует —
+    /// после поиска ждём его не дольше этого времени, иначе склад подписывается кодом KEYZAK, а загрузка доводится в фоне.</summary>
+    public static readonly TimeSpan DefaultStoreNamesGrace = TimeSpan.FromMilliseconds(2500);
 
     private readonly ArmtekAccount _account;
     private readonly ArmtekOptions _options;
@@ -19,10 +22,15 @@ public sealed class ArmtekProvider : IQuotationProvider
     private readonly IMemoryCache _cache;
     private readonly TimeProvider _clock;
     private readonly IProducerAliasService _aliases;
+    private readonly TimeSpan _storeNamesGrace;
+    private readonly object _storesLock = new();
+    private Task<IReadOnlyDictionary<string, string>>? _storesLoading;
 
     public ArmtekProvider(ArmtekAccount account, ArmtekOptions options, ArmtekClient client,
-        ICurrencyConverter currency, IMemoryCache cache, TimeProvider clock, IProducerAliasService aliases)
+        ICurrencyConverter currency, IMemoryCache cache, TimeProvider clock, IProducerAliasService aliases,
+        TimeSpan? storeNamesGrace = null)
     {
+        _storeNamesGrace = storeNamesGrace ?? DefaultStoreNamesGrace;
         _aliases = aliases;
         _account = account;
         _options = options;
@@ -45,9 +53,9 @@ public sealed class ArmtekProvider : IQuotationProvider
         var kunnrTask = string.IsNullOrWhiteSpace(_options.BuyerKunnr)
             ? GetBuyerAsync(vkorg, cancellationToken)
             : Task.FromResult(_options.BuyerKunnr.Trim());
-        var storesTask = GetStoreNamesAsync(vkorg, cancellationToken);
+        var storesTask = StartStoreNamesLoad(vkorg);     // не ждём: справочник большой, грузится параллельно с поиском
         var candidatesTask = ResolveCandidatesAsync(search, vkorg, cancellationToken);
-        await Task.WhenAll(kunnrTask, storesTask, candidatesTask);
+        await Task.WhenAll(kunnrTask, candidatesTask);
 
         var kunnr = kunnrTask.Result;
         var candidates = candidatesTask.Result;
@@ -56,6 +64,8 @@ public sealed class ArmtekProvider : IQuotationProvider
         var queryType = search.IncludeAnalogs ? "2" : "1";
         var responses = await Task.WhenAll(candidates.Select(c => _client.PostAsync<List<ArmtekSearchItem>>("ws_search/search",
             SearchForm(vkorg, kunnr, c, queryType), cancellationToken)));
+
+        var storeNames = await WaitBrieflyAsync(storesTask, cancellationToken);
 
         var now = _clock.GetUtcNow();
         var offers = new List<QuotationOffer>();
@@ -66,7 +76,7 @@ public sealed class ArmtekProvider : IQuotationProvider
             var price = ArmtekMapper.ParseDecimal(item.Price);
             var currency = string.IsNullOrWhiteSpace(item.Currency) ? "RUB" : item.Currency!;
             var rub = price is null ? null : await _currency.ToRubAsync(price.Value, currency, cancellationToken);
-            if (ArmtekMapper.Map(item, storesTask.Result, vkorg, kunnr, _options.DeliveryKunnr, now, rub) is { } offer) offers.Add(offer);
+            if (ArmtekMapper.Map(item, storeNames, vkorg, kunnr, _options.DeliveryKunnr, now, rub) is { } offer) offers.Add(offer);
         }
 
         return offers.OrderBy(x => x.PriceRub?.Amount ?? x.Price.Amount).ToList();
@@ -132,26 +142,50 @@ public sealed class ArmtekProvider : IQuotationProvider
         return kunnr;
     }
 
-    private async Task<IReadOnlyDictionary<string, string>> GetStoreNamesAsync(string vkorg, CancellationToken ct)
+    /// <summary>Запускает (или подхватывает уже идущую) загрузку названий складов. Единая на аккаунт: параллельные проценки
+    /// не качают 8 МБ повторно. Загрузка не привязана к запросу пользователя и доводится до конца в фоне, результат кэшируется.</summary>
+    private Task<IReadOnlyDictionary<string, string>> StartStoreNamesLoad(string vkorg)
     {
         var key = $"armtek:{_account.Key}:stores:{vkorg}";
-        if (_cache.TryGetValue(key, out IReadOnlyDictionary<string, string>? cached) && cached is not null) return cached;
+        if (_cache.TryGetValue(key, out IReadOnlyDictionary<string, string>? cached) && cached is not null)
+            return Task.FromResult(cached);
 
+        lock (_storesLock)
+            // Task.Run: загрузка не должна выполняться внутри lock (её finally тоже берёт lock и мог бы затереть свежее значение).
+            return _storesLoading ??= Task.Run(() => LoadStoreNamesAsync(vkorg, key));
+    }
+
+    private async Task<IReadOnlyDictionary<string, string>> LoadStoreNamesAsync(string vkorg, string cacheKey)
+    {
         try
         {
+            using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(3));
             var stores = (await _client.PostAsync<List<ArmtekStoreItem>>("ws_user/getStoreList",
-                    new Dictionary<string, string> { ["VKORG"] = vkorg }, ct) ?? [])
+                    new Dictionary<string, string> { ["VKORG"] = vkorg }, cts.Token) ?? [])
                 .Where(x => !string.IsNullOrWhiteSpace(x.Keyzak) && !string.IsNullOrWhiteSpace(x.SklName))
                 .GroupBy(x => x.Keyzak!, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(x => x.Key, x => x.First().SklName!, StringComparer.OrdinalIgnoreCase);
-            _cache.Set(key, (IReadOnlyDictionary<string, string>)stores, ReferenceTtl);
+            _cache.Set(cacheKey, (IReadOnlyDictionary<string, string>)stores, ReferenceTtl);
             return stores;
         }
-        catch (Exception ex) when (ex is ArmtekApiException or HttpRequestException)
+        catch (Exception ex) when (ex is ArmtekApiException or HttpRequestException or OperationCanceledException)
         {
             // Справочник — подпись склада: без него склад показывается кодом KEYZAK.
             return new Dictionary<string, string>();
         }
+        finally
+        {
+            lock (_storesLock) _storesLoading = null;
+        }
+    }
+
+    private async Task<IReadOnlyDictionary<string, string>> WaitBrieflyAsync(Task<IReadOnlyDictionary<string, string>> loading,
+        CancellationToken ct)
+    {
+        if (loading.IsCompleted) return await loading;
+
+        var winner = await Task.WhenAny(loading, Task.Delay(_storeNamesGrace, _clock, ct));
+        return winner == loading ? await loading : new Dictionary<string, string>();
     }
 
     private static string Normalize(string? value) =>

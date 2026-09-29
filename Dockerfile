@@ -1,7 +1,9 @@
 # syntax=docker/dockerfile:1
 
 # ---- сборка ----
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+# SDK-этап всегда на платформе сборщика: publish даёт переносимые dll, поэтому образ под другую архитектуру
+# (например, linux/amd64 с Mac на arm64) собирается без эмуляции и быстро.
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
 
 # Сначала проект целиком для restore: слой с пакетами кэшируется, пока не меняются зависимости.
