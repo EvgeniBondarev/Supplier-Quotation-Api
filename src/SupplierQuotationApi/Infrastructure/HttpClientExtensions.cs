@@ -21,13 +21,15 @@ public static class HttpClientExtensions
     }
 
     /// <summary>То же для именованного клиента: когда у одного API несколько аккаунтов и клиент создаётся через фабрику.</summary>
-    public static IHttpClientBuilder AddProviderHttpClient(this IServiceCollection services, string name, string baseUrlConfigKey)
+    /// <param name="cookies">Общий контейнер cookie для API с сессией (портал): переживает ротацию обработчиков фабрики.</param>
+    public static IHttpClientBuilder AddProviderHttpClient(this IServiceCollection services, string name, string baseUrlConfigKey,
+        System.Net.CookieContainer? cookies = null)
     {
         return services.AddHttpClient(name, (sp, client) =>
         {
             var baseUrl = sp.GetRequiredService<IConfiguration>()[baseUrlConfigKey];
             client.BaseAddress = ParseBaseAddress(baseUrl);
-        }).ConfigureProviderHandlers();
+        }).ConfigureProviderHandlers(cookies);
     }
 
     /// <summary>Завершающий слэш обязателен: без него относительный путь заменяет последний сегмент
@@ -39,13 +41,15 @@ public static class HttpClientExtensions
         return Uri.TryCreate(normalized, UriKind.Absolute, out var uri) ? uri : null;
     }
 
-    private static IHttpClientBuilder ConfigureProviderHandlers(this IHttpClientBuilder builder)
+    private static IHttpClientBuilder ConfigureProviderHandlers(this IHttpClientBuilder builder, System.Net.CookieContainer? cookies = null)
     {
         builder.ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
         {
             PooledConnectionLifetime = TimeSpan.FromMinutes(5),
             EnableMultipleHttp2Connections = true,
-            AutomaticDecompression = System.Net.DecompressionMethods.All
+            AutomaticDecompression = System.Net.DecompressionMethods.All,
+            UseCookies = cookies is not null,
+            CookieContainer = cookies ?? new System.Net.CookieContainer()
         });
 
         builder.AddStandardResilienceHandler(o =>

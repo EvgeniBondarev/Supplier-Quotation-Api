@@ -1,4 +1,5 @@
 using SupplierQuotationApi.Contracts;
+using SupplierQuotationApi.Core.ProducerAliases;
 
 namespace SupplierQuotationApi.Providers.Berg;
 
@@ -6,11 +7,11 @@ namespace SupplierQuotationApi.Providers.Berg;
 public static class BergMapper
 {
     public static List<QuotationOffer> Map(IEnumerable<BergResource> resources, string requestedArticle, string? brand,
-        bool includeAnalogs, DateOnly today)
+        bool includeAnalogs, DateOnly today, ProducerAliasMap? aliases = null)
     {
+        aliases ??= ProducerAliasMap.Empty;
         var offers = new List<QuotationOffer>();
         var requested = Normalize(requestedArticle);
-        var requestedBrand = Normalize(brand);
 
         foreach (var resource in resources)
         {
@@ -18,7 +19,7 @@ public static class BergMapper
             // Контракт: только оригиналы запрошенного артикула, даже если сервер вернул что-то ещё.
             if (isAnalog && !includeAnalogs) continue;
             // Берг параметр brand_name фактически игнорирует и отдаёт все бренды артикула — бренд отсекаем здесь.
-            if (!isAnalog && !BrandMatches(resource.Brand?.Name, requestedBrand)) continue;
+            if (!isAnalog && !BrandMatches(resource.Brand?.Name, brand, aliases)) continue;
 
             foreach (var offer in resource.Offers ?? [])
             {
@@ -83,14 +84,13 @@ public static class BergMapper
             ? DateOnly.FromDateTime(value)
             : null;
 
-    /// <summary>Бренд: точно, по вхождению или через транслитерацию (TecDoc «LUKOIL» ↔ Berg «ЛУКОЙЛ»).</summary>
-    public static bool BrandMatches(string? actual, string requestedBrand)
+    /// <summary>Бренд: по алиасам Studio2, вхождению и транслитерации (TecDoc «LUKOIL» ↔ Berg «ЛУКОЙЛ»).</summary>
+    public static bool BrandMatches(string? actual, string? requestedBrand, ProducerAliasMap? aliases = null)
     {
-        if (requestedBrand.Length == 0) return true;
-        foreach (var candidate in new[] { Normalize(actual), Normalize(Transliterate(actual, true)), Normalize(Transliterate(actual, false)) })
-            if (candidate.Length > 0 && (candidate == requestedBrand || candidate.Contains(requestedBrand) || requestedBrand.Contains(candidate)))
-                return true;
-        return false;
+        aliases ??= ProducerAliasMap.Empty;
+        return aliases.Matches(actual, requestedBrand)
+               || aliases.Matches(Transliterate(actual, true), requestedBrand)
+               || aliases.Matches(Transliterate(actual, false), requestedBrand);
     }
 
     private static readonly Dictionary<char, string> CyrillicToLatin = new()

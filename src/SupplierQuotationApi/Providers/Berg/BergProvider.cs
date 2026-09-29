@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using SupplierQuotationApi.Contracts;
+using SupplierQuotationApi.Core.ProducerAliases;
 
 namespace SupplierQuotationApi.Providers.Berg;
 
@@ -13,9 +14,12 @@ public sealed class BergProvider : IQuotationProvider
     private readonly BergOptions _options;
     private readonly IMemoryCache _cache;
     private readonly TimeProvider _clock;
+    private readonly IProducerAliasService _aliases;
 
-    public BergProvider(IServiceProvider services, IOptions<BergOptions> options, IMemoryCache cache, TimeProvider clock)
+    public BergProvider(IServiceProvider services, IOptions<BergOptions> options, IMemoryCache cache, TimeProvider clock,
+        IProducerAliasService aliases)
     {
+        _aliases = aliases;
         _services = services;
         _options = options.Value;
         _cache = cache;
@@ -38,7 +42,8 @@ public sealed class BergProvider : IQuotationProvider
         var resources = await client.GetStockAsync(search.Article, search.IncludeAnalogs, addressId, cancellationToken);
 
         var today = DateOnly.FromDateTime(_clock.GetUtcNow().ToOffset(MoscowOffset).DateTime);
-        return BergMapper.Map(resources, search.Article, search.Brand, search.IncludeAnalogs, today)
+        var aliases = await _aliases.GetMapAsync(cancellationToken);
+        return BergMapper.Map(resources, search.Article, search.Brand, search.IncludeAnalogs, today, aliases)
             .OrderBy(x => x.Price.Amount)
             .ToList();
     }

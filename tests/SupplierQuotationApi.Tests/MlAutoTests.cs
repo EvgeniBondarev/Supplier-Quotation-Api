@@ -57,13 +57,6 @@ public class MlAutoTests
         Assert.Equal("Доставка завтра", MlAutoMapper.CleanText("<b>Доставка</b> <br/>завтра")!.Replace("  ", " "));
     }
 
-    [Theory]
-    [InlineData("WYNN'S", new[] { "WYNN'S", "WYNNS" })]
-    [InlineData("Filtron", new[] { "Filtron" })]
-    [InlineData("Febi Bilstein", new[] { "Febi Bilstein", "FebiBilstein" })]
-    public void BrandCandidates_AddsCleanedVariantOnlyWhenDifferent(string brand, string[] expected) =>
-        Assert.Equal(expected, MlAutoProvider.BrandCandidates(brand));
-
     private sealed class StubHandler(string body, HttpStatusCode status = HttpStatusCode.OK) : HttpMessageHandler
     {
         public string? LastUri;

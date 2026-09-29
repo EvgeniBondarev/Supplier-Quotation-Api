@@ -1,4 +1,5 @@
 using SupplierQuotationApi.Contracts;
+using SupplierQuotationApi.Core.ProducerAliases;
 
 namespace SupplierQuotationApi.Providers.ForumAuto;
 
@@ -8,9 +9,12 @@ public sealed class ForumAutoProvider : IQuotationProvider
     private readonly ForumAutoAccount _account;
     private readonly ForumAutoOptions _options;
     private readonly ForumAutoClient _client;
+    private readonly IProducerAliasService _aliases;
 
-    public ForumAutoProvider(ForumAutoAccount account, ForumAutoOptions options, ForumAutoClient client)
+    public ForumAutoProvider(ForumAutoAccount account, ForumAutoOptions options, ForumAutoClient client,
+        IProducerAliasService aliases)
     {
+        _aliases = aliases;
         _account = account;
         _options = options;
         _client = client;
@@ -27,7 +31,8 @@ public sealed class ForumAutoProvider : IQuotationProvider
         // Бренд не передаём в br: API требует точное своё написание. Берём все бренды кода и фильтруем локально.
         var rows = await _client.ListGoodsAsync(search.Article, search.IncludeAnalogs, cancellationToken);
 
-        return ForumAutoMapper.Map(rows, search.Article, search.Brand, search.IncludeAnalogs)
+        var aliases = await _aliases.GetMapAsync(cancellationToken);
+        return ForumAutoMapper.Map(rows, search.Article, search.Brand, search.IncludeAnalogs, aliases)
             .OrderBy(x => x.Price.Amount)
             .ToList();
     }

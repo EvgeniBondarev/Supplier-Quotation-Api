@@ -2,6 +2,7 @@ using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using SupplierQuotationApi.Contracts;
 using SupplierQuotationApi.Core;
+using SupplierQuotationApi.Core.ProducerAliases;
 
 namespace SupplierQuotationApi.Providers.Motex;
 
@@ -13,10 +14,12 @@ public sealed class MotexProvider : IQuotationProvider
     private readonly ICurrencyConverter _currency;
     private readonly IMemoryCache _cache;
     private readonly TimeProvider _clock;
+    private readonly IProducerAliasService _aliases;
 
     public MotexProvider(IServiceProvider services, IOptions<MotexOptions> options, ICurrencyConverter currency,
-        IMemoryCache cache, TimeProvider clock)
+        IMemoryCache cache, TimeProvider clock, IProducerAliasService aliases)
     {
+        _aliases = aliases;
         _services = services;
         _options = options.Value;
         _currency = currency;
@@ -36,7 +39,13 @@ public sealed class MotexProvider : IQuotationProvider
         var client = _services.GetRequiredService<MotexClient>();
 
         var addressCode = await GetSingleAddressCodeAsync(client, cancellationToken);
-        var articles = await client.SearchAsync(search.Article, search.Brand, addressCode, cancellationToken);
+        // Бренд уходит в API как есть: пробуем исходное написание и алиасы из базы Studio2, результаты объединяем.
+        var aliases = await _aliases.GetMapAsync(cancellationToken);
+        var brands = aliases.QueryVariants(search.Brand, 3);
+        var responses = await Task.WhenAll((brands.Count == 0 ? [(string?)null] : brands.Select(b => (string?)b))
+            .Select(b => client.SearchAsync(search.Article, b, addressCode, cancellationToken)));
+        var articles = responses.SelectMany(x => x)
+            .DistinctBy(x => string.Join("|", x.Code, x.StoreCode, x.Price)).ToList();
 
         var currency = string.IsNullOrWhiteSpace(_options.Currency) ? "BYN" : _options.Currency!.ToUpperInvariant();
         var now = _clock.GetUtcNow();

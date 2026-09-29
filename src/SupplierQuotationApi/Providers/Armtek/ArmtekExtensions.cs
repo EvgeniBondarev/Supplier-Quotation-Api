@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Caching.Memory;
 using SupplierQuotationApi.Core;
+using SupplierQuotationApi.Core.ProducerAliases;
 using SupplierQuotationApi.Infrastructure;
 
 namespace SupplierQuotationApi.Providers.Armtek;
@@ -26,7 +27,7 @@ public static class ArmtekExtensions
                 new ArmtekClient(sp.GetRequiredService<IHttpClientFactory>().CreateClient(account.HttpClientName), options,
                     sp.GetRequiredService<TimeProvider>()),
                 sp.GetRequiredService<ICurrencyConverter>(), sp.GetRequiredService<IMemoryCache>(),
-                sp.GetRequiredService<TimeProvider>()));
+                sp.GetRequiredService<TimeProvider>(), sp.GetRequiredService<IProducerAliasService>()));
         }
         return services;
     }

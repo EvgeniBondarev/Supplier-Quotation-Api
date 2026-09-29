@@ -1,4 +1,5 @@
 using SupplierQuotationApi.Contracts;
+using SupplierQuotationApi.Core.ProducerAliases;
 
 namespace SupplierQuotationApi.Providers.FavoritParts;
 
@@ -9,10 +10,12 @@ public sealed class FavoritPartsProvider : IQuotationProvider
     private readonly FavoritPartsOptions _options;
     private readonly FavoritPartsClient _client;
     private readonly TimeProvider _clock;
+    private readonly IProducerAliasService _aliases;
 
     public FavoritPartsProvider(FavoritPartsAccount account, FavoritPartsOptions options, FavoritPartsClient client,
-        TimeProvider clock)
+        TimeProvider clock, IProducerAliasService aliases)
     {
+        _aliases = aliases;
         _account = account;
         _options = options;
         _client = client;
@@ -30,9 +33,12 @@ public sealed class FavoritPartsProvider : IQuotationProvider
     {
         // Аналоги сервис отдаёт только вместе с брендом (analogues=on + brand).
         var withAnalogues = search.IncludeAnalogs && !string.IsNullOrWhiteSpace(search.Brand);
-        var goods = await _client.SearchAsync(search.Article, search.Brand, withAnalogues, cancellationToken);
+        // Бренд в API передаём только с аналогами. Без него сервис отдаёт все бренды артикула, и бренд запроса сверяется
+        // здесь, с алиасами: так «Kayaba» находит предложения, которые FavoritParts подписывает «KYB».
+        var goods = await _client.SearchAsync(search.Article, withAnalogues ? search.Brand : null, withAnalogues, cancellationToken);
 
-        return FavoritPartsMapper.Map(goods, search.Article, search.Brand, withAnalogues, _clock.GetUtcNow())
+        var aliases = await _aliases.GetMapAsync(cancellationToken);
+        return FavoritPartsMapper.Map(goods, search.Article, search.Brand, withAnalogues, _clock.GetUtcNow(), aliases)
             .OrderBy(x => x.Price.Amount)
             .ToList();
     }

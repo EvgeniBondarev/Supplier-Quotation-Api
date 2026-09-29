@@ -1,4 +1,5 @@
 using SupplierQuotationApi.Contracts;
+using SupplierQuotationApi.Core.ProducerAliases;
 
 namespace SupplierQuotationApi.Providers.FavoritParts;
 
@@ -9,15 +10,15 @@ public static class FavoritPartsMapper
     private static readonly TimeSpan MoscowOffset = TimeSpan.FromHours(3);
 
     public static List<QuotationOffer> Map(IEnumerable<FavoritPartsGoods> goods, string requestedArticle, string? brand,
-        bool includeAnalogues, DateTimeOffset now)
+        bool includeAnalogues, DateTimeOffset now, ProducerAliasMap? aliases = null)
     {
+        aliases ??= ProducerAliasMap.Empty;
         var offers = new List<QuotationOffer>();
         var requested = Normalize(requestedArticle);
-        var requestedBrand = Normalize(brand);
 
         foreach (var item in goods)
         {
-            if (Normalize(item.Number) == requested && BrandMatches(item.Brand, requestedBrand))
+            if (Normalize(item.Number) == requested && aliases.Matches(item.Brand, brand))
                 MapGoods(item, offers, isAnalogue: false, now);
 
             if (!includeAnalogues) continue;
@@ -81,13 +82,6 @@ public static class FavoritPartsMapper
         var today = DateOnly.FromDateTime(now.ToOffset(MoscowOffset).DateTime);
         var shipDay = DateOnly.FromDateTime(shipment.Value.ToOffset(MoscowOffset).DateTime);
         return Math.Max(0, shipDay.DayNumber - today.DayNumber);
-    }
-
-    private static bool BrandMatches(string? actual, string requestedBrand)
-    {
-        if (requestedBrand.Length == 0) return true;
-        var brand = Normalize(actual);
-        return brand == requestedBrand || (brand.Length > 0 && (brand.Contains(requestedBrand) || requestedBrand.Contains(brand)));
     }
 
     /// <summary>Артикул без разделителей и регистра: 7160-500 039 S == 7160500039S.</summary>

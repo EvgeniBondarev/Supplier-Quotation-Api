@@ -2,6 +2,7 @@ using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using SupplierQuotationApi.Contracts;
 using SupplierQuotationApi.Core;
+using SupplierQuotationApi.Core.ProducerAliases;
 
 namespace SupplierQuotationApi.Providers.Armtek;
 
@@ -17,10 +18,12 @@ public sealed class ArmtekProvider : IQuotationProvider
     private readonly ICurrencyConverter _currency;
     private readonly IMemoryCache _cache;
     private readonly TimeProvider _clock;
+    private readonly IProducerAliasService _aliases;
 
     public ArmtekProvider(ArmtekAccount account, ArmtekOptions options, ArmtekClient client,
-        ICurrencyConverter currency, IMemoryCache cache, TimeProvider clock)
+        ICurrencyConverter currency, IMemoryCache cache, TimeProvider clock, IProducerAliasService aliases)
     {
+        _aliases = aliases;
         _account = account;
         _options = options;
         _client = client;
@@ -107,11 +110,9 @@ public sealed class ArmtekProvider : IQuotationProvider
             .ToList();
         if (string.IsNullOrWhiteSpace(search.Brand)) return byCode.Take(MaxBrandCandidates).ToList();
 
-        var brand = Normalize(search.Brand);
-        var exact = byCode.Where(x => Normalize(x.Brand) == brand).ToList();
-        return exact.Count > 0
-            ? exact
-            : byCode.Where(x => Normalize(x.Brand) is { Length: > 0 } b && (b.Contains(brand) || brand.Contains(b))).ToList();
+        var aliases = await _aliases.GetMapAsync(ct);
+        var exact = byCode.Where(x => aliases.AreSame(x.Brand, search.Brand)).ToList();
+        return exact.Count > 0 ? exact : byCode.Where(x => aliases.Matches(x.Brand, search.Brand)).ToList();
     }
 
     private async Task<string> GetBuyerAsync(string vkorg, CancellationToken ct)

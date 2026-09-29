@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Caching.Memory;
 using SupplierQuotationApi.Contracts;
 using SupplierQuotationApi.Core;
+using SupplierQuotationApi.Core.ProducerAliases;
 
 namespace SupplierQuotationApi.Providers.MlAuto;
 
@@ -15,10 +16,12 @@ public sealed class MlAutoProvider : IQuotationProvider
     private readonly ICurrencyConverter _currency;
     private readonly IMemoryCache _cache;
     private readonly TimeProvider _clock;
+    private readonly IProducerAliasService _aliases;
 
     public MlAutoProvider(MlAutoAccount account, MlAutoOptions options, MlAutoClient client, ICurrencyConverter currency,
-        IMemoryCache cache, TimeProvider clock)
+        IMemoryCache cache, TimeProvider clock, IProducerAliasService aliases)
     {
+        _aliases = aliases;
         _account = account;
         _options = options;
         _client = client;
@@ -39,8 +42,10 @@ public sealed class MlAutoProvider : IQuotationProvider
             throw new MlAutoApiException("ML-Auto ищет только по паре артикул + бренд: укажите бренд.");
 
         var conditionsTask = GetConditionsAsync(cancellationToken);
-        // API принимает бренд только в своём написании («WYNNS», а не «WYNN'S»): пробуем и исходный, и очищенный вариант.
-        var searches = BrandCandidates(search.Brand).Select(b => _client.SearchAsync(search.Article, b, cancellationToken)).ToList();
+        // API принимает бренд только в своём написании («WYNNS», а не «WYNN'S», «KYB», а не «Kayaba»): пробуем исходное,
+        // очищенное и известные алиасы из базы Studio2.
+        var aliases = await _aliases.GetMapAsync(cancellationToken);
+        var searches = aliases.QueryVariants(search.Brand).Select(b => _client.SearchAsync(search.Article, b, cancellationToken)).ToList();
         await Task.WhenAll(searches.Cast<Task>().Append(conditionsTask));
         var found = searches.SelectMany(t => t.Result).DistinctBy(x => string.Join("|", x.Pin, x.StorageCode, x.Price, x.Date)).ToList();
 
@@ -56,16 +61,6 @@ public sealed class MlAutoProvider : IQuotationProvider
         }
 
         return result.OrderBy(x => x.PriceRub?.Amount ?? x.Price.Amount).ToList();
-    }
-
-    /// <summary>Исходный бренд и, если он отличается, вариант из одних букв и цифр («WYNN'S» → «WYNNS»).</summary>
-    public static IReadOnlyList<string> BrandCandidates(string brand)
-    {
-        var original = brand.Trim();
-        var cleaned = new string(original.Where(char.IsLetterOrDigit).ToArray());
-        return cleaned.Length == 0 || string.Equals(cleaned, original, StringComparison.OrdinalIgnoreCase)
-            ? [original]
-            : [original, cleaned];
     }
 
     /// <summary>ID склада → условия поставки. Справочник вспомогательный: при сбое условия просто не показываются.</summary>

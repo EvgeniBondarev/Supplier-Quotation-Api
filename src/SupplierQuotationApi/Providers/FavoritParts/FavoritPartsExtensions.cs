@@ -1,3 +1,4 @@
+using SupplierQuotationApi.Core.ProducerAliases;
 using SupplierQuotationApi.Infrastructure;
 
 namespace SupplierQuotationApi.Providers.FavoritParts;
@@ -23,7 +24,7 @@ public static class FavoritPartsExtensions
             services.AddSingleton<IQuotationProvider>(sp => new FavoritPartsProvider(
                 account, options,
                 new FavoritPartsClient(sp.GetRequiredService<IHttpClientFactory>().CreateClient(account.HttpClientName), options),
-                sp.GetRequiredService<TimeProvider>()));
+                sp.GetRequiredService<TimeProvider>(), sp.GetRequiredService<IProducerAliasService>()));
         }
         return services;
     }

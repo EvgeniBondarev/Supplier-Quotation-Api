@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Caching.Memory;
 using SupplierQuotationApi.Core;
+using SupplierQuotationApi.Core.ProducerAliases;
 using SupplierQuotationApi.Infrastructure;
 
 namespace SupplierQuotationApi.Providers.MlAuto;
@@ -28,7 +29,7 @@ public static class MlAutoExtensions
                 account, options,
                 new MlAutoClient(sp.GetRequiredService<IHttpClientFactory>().CreateClient(account.Key), options),
                 sp.GetRequiredService<ICurrencyConverter>(), sp.GetRequiredService<IMemoryCache>(),
-                sp.GetRequiredService<TimeProvider>()));
+                sp.GetRequiredService<TimeProvider>(), sp.GetRequiredService<IProducerAliasService>()));
         }
         return services;
     }

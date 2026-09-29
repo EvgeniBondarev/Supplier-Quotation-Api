@@ -2,6 +2,7 @@ using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using SupplierQuotationApi.Contracts;
 using SupplierQuotationApi.Core;
+using SupplierQuotationApi.Core.ProducerAliases;
 
 namespace SupplierQuotationApi.Providers.ShateM;
 
@@ -13,10 +14,12 @@ public sealed class ShateMProvider : IQuotationProvider
     private readonly ICurrencyConverter _currency;
     private readonly IMemoryCache _cache;
     private readonly TimeProvider _clock;
+    private readonly IProducerAliasService _aliases;
 
     public ShateMProvider(IServiceProvider services, IOptions<ShateMOptions> options, ICurrencyConverter currency,
-        IMemoryCache cache, TimeProvider clock)
+        IMemoryCache cache, TimeProvider clock, IProducerAliasService aliases)
     {
+        _aliases = aliases;
         _services = services;
         _options = options.Value;
         _currency = currency;
@@ -35,7 +38,8 @@ public sealed class ShateMProvider : IQuotationProvider
         // Клиент транзитный: берём свежий из фабрики, чтобы работала ротация обработчиков.
         var client = _services.GetRequiredService<ShateMClient>();
 
-        var articles = MatchArticles(await client.SearchArticlesAsync(Normalize(search.Article), cancellationToken), search);
+        var aliases = await _aliases.GetMapAsync(cancellationToken);
+        var articles = MatchArticles(await client.SearchArticlesAsync(Normalize(search.Article), cancellationToken), search, aliases);
         if (articles.Count == 0) return [];
 
         var locationsTask = GetLocationsAsync(client, cancellationToken);
@@ -61,17 +65,15 @@ public sealed class ShateMProvider : IQuotationProvider
     }
 
     /// <summary>Артикул должен совпасть с запрошенным; бренд — если указан (точно, иначе по вхождению: MAHLE ↔ MAHLE ORIGINAL).</summary>
-    private static List<ShateMArticle> MatchArticles(IEnumerable<ShateMArticle> found, QuotationSearch search)
+    public static List<ShateMArticle> MatchArticles(IEnumerable<ShateMArticle> found, QuotationSearch search, ProducerAliasMap? aliases = null)
     {
         var code = Normalize(search.Article);
         var byCode = found.Where(x => Normalize(x.Code) == code).ToList();
         if (string.IsNullOrWhiteSpace(search.Brand)) return byCode;
 
-        var brand = Normalize(search.Brand);
-        var exact = byCode.Where(x => Normalize(x.TradeMarkName) == brand).ToList();
-        return exact.Count > 0
-            ? exact
-            : byCode.Where(x => Normalize(x.TradeMarkName) is { Length: > 0 } b && (b.Contains(brand) || brand.Contains(b))).ToList();
+        aliases ??= ProducerAliasMap.Empty;
+        var exact = byCode.Where(x => aliases.AreSame(x.TradeMarkName, search.Brand)).ToList();
+        return exact.Count > 0 ? exact : byCode.Where(x => aliases.Matches(x.TradeMarkName, search.Brand)).ToList();
     }
 
     private async Task<IReadOnlyDictionary<string, ShateMLocation>> GetLocationsAsync(ShateMClient client, CancellationToken ct)

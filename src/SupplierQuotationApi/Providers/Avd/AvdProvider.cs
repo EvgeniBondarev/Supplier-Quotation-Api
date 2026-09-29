@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using SupplierQuotationApi.Contracts;
+using SupplierQuotationApi.Core.ProducerAliases;
 
 namespace SupplierQuotationApi.Providers.Avd;
 
@@ -8,9 +9,11 @@ public sealed class AvdProvider : IQuotationProvider
     private const int MaxCatalogs = 6;
     private readonly IServiceProvider _services;
     private readonly AvdOptions _options;
+    private readonly IProducerAliasService _aliases;
 
-    public AvdProvider(IServiceProvider services, IOptions<AvdOptions> options)
+    public AvdProvider(IServiceProvider services, IOptions<AvdOptions> options, IProducerAliasService aliases)
     {
+        _aliases = aliases;
         _services = services;
         _options = options.Value;
     }
@@ -26,7 +29,8 @@ public sealed class AvdProvider : IQuotationProvider
         // Клиент транзитный: свежий из фабрики, чтобы работала ротация обработчиков.
         var client = _services.GetRequiredService<AvdClient>();
 
-        var catalogs = SelectCatalogs(await client.GetCatalogsAsync(search.Article, cancellationToken), search.Brand);
+        var aliases = await _aliases.GetMapAsync(cancellationToken);
+        var catalogs = SelectCatalogs(await client.GetCatalogsAsync(search.Article, cancellationToken), search.Brand, aliases);
         if (catalogs.Count == 0) return [];
 
         var responses = await Task.WhenAll(catalogs.Select(c => client.GetOriginalPriceAsync(search.Article, c, cancellationToken)));
@@ -41,14 +45,12 @@ public sealed class AvdProvider : IQuotationProvider
 
     /// <summary>Каталог = бренд. С брендом берём совпавший (точно, иначе по вхождению), без бренда — все, но не больше лимита.
     /// Если бренд задан и совпадений нет — пусто: подставлять первый каталог значит вернуть чужой бренд.</summary>
-    public static List<string> SelectCatalogs(IReadOnlyList<string> catalogs, string? brand)
+    public static List<string> SelectCatalogs(IReadOnlyList<string> catalogs, string? brand, ProducerAliasMap? aliases = null)
     {
         if (string.IsNullOrWhiteSpace(brand)) return catalogs.Take(MaxCatalogs).ToList();
 
-        var wanted = AvdMapper.Normalize(brand);
-        var exact = catalogs.Where(c => AvdMapper.Normalize(c) == wanted).ToList();
-        return exact.Count > 0
-            ? exact
-            : catalogs.Where(c => AvdMapper.Normalize(c) is { Length: > 0 } n && (n.Contains(wanted) || wanted.Contains(n))).ToList();
+        aliases ??= ProducerAliasMap.Empty;
+        var exact = catalogs.Where(c => aliases.AreSame(c, brand)).ToList();
+        return exact.Count > 0 ? exact : catalogs.Where(c => aliases.Matches(c, brand)).ToList();
     }
 }

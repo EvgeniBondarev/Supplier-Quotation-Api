@@ -1,10 +1,12 @@
 using System.Text.Json.Serialization;
 using SupplierQuotationApi.Core;
+using SupplierQuotationApi.Core.ProducerAliases;
 using SupplierQuotationApi.Infrastructure;
 using SupplierQuotationApi.Providers.Armtek;
 using SupplierQuotationApi.Providers.Avd;
 using SupplierQuotationApi.Providers.Berg;
 using SupplierQuotationApi.Providers.MlAuto;
+using SupplierQuotationApi.Providers.Moskvorechie;
 using SupplierQuotationApi.Providers.Motex;
 using SupplierQuotationApi.Providers.FavoritParts;
 using SupplierQuotationApi.Providers.ForumAuto;
@@ -28,6 +30,8 @@ builder.Services.AddSwaggerGen();
 builder.Services.AddHealthChecks();
 builder.Services.AddMemoryCache();
 
+builder.Services.Configure<Studio2DbOptions>(builder.Configuration.GetSection(Studio2DbOptions.Section));
+builder.Services.AddSingleton<IProducerAliasService, ProducerAliasService>();
 builder.Services.AddSingleton<InflightResultCache>();
 builder.Services.AddSingleton<QuotationService>();
 builder.Services.AddHttpClient<ICurrencyConverter, CbrCurrencyConverter>(c => c.Timeout = TimeSpan.FromSeconds(10));
@@ -43,6 +47,7 @@ builder.Services.AddAvd(builder.Configuration);
 builder.Services.AddBerg(builder.Configuration);
 builder.Services.AddMotex(builder.Configuration);
 builder.Services.AddMlAuto(builder.Configuration);
+builder.Services.AddMoskvorechie(builder.Configuration);
 
 var app = builder.Build();
 

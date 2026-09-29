@@ -1,4 +1,5 @@
 using SupplierQuotationApi.Contracts;
+using SupplierQuotationApi.Core.ProducerAliases;
 
 namespace SupplierQuotationApi.Providers.ForumAuto;
 
@@ -6,11 +7,11 @@ namespace SupplierQuotationApi.Providers.ForumAuto;
 public static class ForumAutoMapper
 {
     public static List<QuotationOffer> Map(IEnumerable<ForumAutoRow> rows, string requestedArticle, string? brand,
-        bool includeAnalogs)
+        bool includeAnalogs, ProducerAliasMap? aliases = null)
     {
+        aliases ??= ProducerAliasMap.Empty;
         var offers = new List<QuotationOffer>();
         var requested = Normalize(requestedArticle);
-        var requestedBrand = Normalize(brand);
 
         foreach (var row in rows)
         {
@@ -21,7 +22,7 @@ public static class ForumAutoMapper
             // Контракт: только оригиналы запрошенного артикула, даже если сервер вернул что-то ещё.
             if (isAnalog && !includeAnalogs) continue;
             // Бренд сверяем локально: написания у Forum-Auto свои («FEBI», а не «Febi Bilstein»).
-            if (!isAnalog && !BrandMatches(row.Brand, requestedBrand)) continue;
+            if (!isAnalog && !aliases.Matches(row.Brand, brand)) continue;
 
             var days = row.DeliveryDays;
             // h_deliv — полный срок в часах: верхняя граница не меньше дней, округляем часы вверх.
@@ -53,13 +54,6 @@ public static class ForumAutoMapper
             });
         }
         return offers;
-    }
-
-    private static bool BrandMatches(string? actual, string requestedBrand)
-    {
-        if (requestedBrand.Length == 0) return true;
-        var brand = Normalize(actual);
-        return brand == requestedBrand || (brand.Length > 0 && (brand.Contains(requestedBrand) || requestedBrand.Contains(brand)));
     }
 
     public static string Normalize(string? value) =>

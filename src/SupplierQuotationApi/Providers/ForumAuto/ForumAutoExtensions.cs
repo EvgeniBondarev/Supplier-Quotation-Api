@@ -1,3 +1,4 @@
+using SupplierQuotationApi.Core.ProducerAliases;
 using SupplierQuotationApi.Infrastructure;
 
 namespace SupplierQuotationApi.Providers.ForumAuto;
@@ -24,7 +25,8 @@ public static class ForumAutoExtensions
             services.AddProviderHttpClient(account.Key, $"{account.ConfigSection}:BaseUrl");
             services.AddSingleton<IQuotationProvider>(sp => new ForumAutoProvider(
                 account, options,
-                new ForumAutoClient(sp.GetRequiredService<IHttpClientFactory>().CreateClient(account.Key), options)));
+                new ForumAutoClient(sp.GetRequiredService<IHttpClientFactory>().CreateClient(account.Key), options),
+                sp.GetRequiredService<IProducerAliasService>()));
         }
         return services;
     }
