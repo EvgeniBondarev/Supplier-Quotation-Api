@@ -5,11 +5,13 @@ using SupplierQuotationApi.Infrastructure;
 using SupplierQuotationApi.Providers.Armtek;
 using SupplierQuotationApi.Providers.Avd;
 using SupplierQuotationApi.Providers.Berg;
+using SupplierQuotationApi.Providers.Mikado;
 using SupplierQuotationApi.Providers.MlAuto;
 using SupplierQuotationApi.Providers.Moskvorechie;
 using SupplierQuotationApi.Providers.Japarts;
 using SupplierQuotationApi.Providers.Motex;
 using SupplierQuotationApi.Providers.Nikei;
+using SupplierQuotationApi.Providers.ZZap;
 using SupplierQuotationApi.Providers.ProfitLiga;
 using SupplierQuotationApi.Providers.FavoritParts;
 using SupplierQuotationApi.Providers.ForumAuto;
@@ -54,6 +56,8 @@ builder.Services.AddMoskvorechie(builder.Configuration);
 builder.Services.AddProfitLiga(builder.Configuration);
 builder.Services.AddJaparts(builder.Configuration);
 builder.Services.AddNikei(builder.Configuration);
+builder.Services.AddMikado(builder.Configuration);
+builder.Services.AddZZap(builder.Configuration);
 
 var app = builder.Build();
 

@@ -70,6 +70,25 @@ Providers/ShateM/
 - Ответ: `providers[]` — `providerKey`, `providerName`, `logoUrl`, `accountLogin`, `status`, `error`, `durationMs`, `offers[]`.
 - Оффер: `productName`, `brand`, `article`, `warehouse`, `stock`, `stockText`, `minOrderQuantity`, `deliveryDaysMin/Max`, `price {amount,currency}`, `priceRub`, `offerId`, `providerData`.
 
+## Подключённые поставщики
+
+| Ключ | Поставщик | Особенности |
+|---|---|---|
+| `ShateM` | Шате-М | REST, Bearer, цены BYN → RUB; поиск артикулов по коду, бренд локально |
+| `Armtek`, `ArmtekBy` | Armtek RU/BY | form-POST, Basic; для RU нужен адрес доставки (`DELIVERYKUNNR`), суточная квота |
+| `FavoritParts`, `…Istra`, `…Rostov` | FavoritParts ×3 | ключи в query, срок по московской дате |
+| `ForumAuto`, `…Interparts`, `…Piter`, `…Rostov`, `…Istra` | Forum-Auto ×5 | общий каталог, разные склады |
+| `Avd` | АВД | SOAP, агрегатор: поставщик и регион в каждой строке |
+| `Berg` | Берг | ключ в заголовке, адрес отгрузки задаёт сроки |
+| `Motex` | МоТехС | Bearer; доступ по белому списку IP клиента |
+| `MlAuto`, `MlAutoRu` | ML-Auto BY/RU | нужен бренд в точном написании (пробуются варианты) |
+| `MoskvorechieIstra` | Москворечье | портал (cookie, windows-1251), API запасным путём |
+| `ProfitLiga` | Профит-Лига | ключ в query, PHP-коллекции |
+| `Japarts` | Japarts | windows-1251; SQL API не экранирует апострофы — небезопасные значения не отправляются |
+| `Nikei` | Nikei | Basic; без бренда отдаёт список брендов |
+| `MikadoMskHod20` | Микадо | SOAP, нужен бренд; пустой список без `Message = Ok` — ошибка |
+| `ZZapMoscow` | ZZap Москва | агрегатор продавцов; лимит 1 запрос в 3,5 с на весь процесс, обязательна подпись источника |
+
 ## Секреты
 
 Все секреты — в одном файле `.env` (в `.gitignore`), шаблон без значений — `.env.example`.
