@@ -2,6 +2,7 @@ using System.Text.Json.Serialization;
 using SupplierQuotationApi.Core;
 using SupplierQuotationApi.Core.ProducerAliases;
 using SupplierQuotationApi.Infrastructure;
+using SupplierQuotationApi.Infrastructure.Swagger;
 using SupplierQuotationApi.Providers.Armtek;
 using SupplierQuotationApi.Providers.Avd;
 using SupplierQuotationApi.Providers.Berg;
@@ -18,7 +19,8 @@ using SupplierQuotationApi.Providers.ForumAuto;
 using SupplierQuotationApi.Providers.ShateM;
 
 // .env → переменные окружения, до создания конфигурации. Уже заданные переменные имеют приоритет.
-DotEnv.Load();
+// SKIP_DOTENV=1 — тесты не должны подхватывать боевой .env с машины разработчика.
+if (Environment.GetEnvironmentVariable("SKIP_DOTENV") != "1") DotEnv.Load();
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -31,7 +33,7 @@ builder.Services.Configure<Microsoft.AspNetCore.Http.Json.JsonOptions>(o =>
 builder.Services.AddControllers().AddJsonOptions(o =>
     o.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddApiDocumentation();
 builder.Services.AddHealthChecks();
 builder.Services.AddMemoryCache();
 
@@ -61,11 +63,8 @@ builder.Services.AddZZap(builder.Configuration);
 
 var app = builder.Build();
 
-if (app.Environment.IsDevelopment())
-{
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
+if (app.Environment.IsDevelopment() || builder.Configuration.GetValue<bool>($"{AppOptions.Section}:SwaggerEnabled"))
+    app.UseApiDocumentation();
 
 app.UseHttpsRedirection();
 app.UseStaticFiles();
@@ -74,3 +73,6 @@ app.MapHealthChecks("/health");
 app.MapControllers();
 
 app.Run();
+
+// Нужен интеграционным тестам (WebApplicationFactory<Program>).
+public partial class Program;

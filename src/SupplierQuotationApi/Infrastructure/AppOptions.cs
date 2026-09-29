@@ -13,4 +13,7 @@ public sealed class AppOptions
 
     /// <summary>Время жизни кэша результата проценки. 0 — кэш выключен.</summary>
     public int ResultCacheSeconds { get; set; } = 60;
+
+    /// <summary>Открыть Swagger UI и OpenAPI-документ вне Development. Документ секретов не содержит, но раскрывает список поставщиков.</summary>
+    public bool SwaggerEnabled { get; set; }
 }

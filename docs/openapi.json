@@ -1,0 +1,1211 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "Supplier Quotation API",
+    "description": "Сервис проценки поставщиков автозапчастей. Один запрос с артикулом и брендом опрашивает поставщиков **параллельно**\nи возвращает предложения в **единой структуре**: цена в валюте поставщика и в рублях, остаток, склад, срок, кратность,\nлоготип поставщика и логин учётной записи, под которой сделана проценка.\n\n## Как пользоваться\n\n1. Передайте ключ в заголовке `X-Api-Key` (кнопка **Authorize**).\n2. `POST /api/quotations` — ответ одним JSON, либо `POST /api/quotations/stream` — поток NDJSON по мере готовности.\n3. Список поставщиков и их особенности — `GET /api/quotations/providers`.\n4. Проверка живости — `GET /health` (без ключа).\n\n## Что важно знать\n\n- **Ошибка одного поставщика не ломает ответ**: она приходит внутри `providers[]` со статусом `Error`, `Timeout` или `Disabled`.\n  Поэтому HTTP-код `200` не означает, что все поставщики ответили: смотрите `status` каждого.\n- **Таймаут** на поставщика — 20 секунд. Общее время равно времени самого медленного поставщика, а не сумме.\n- **Кэш** результатов — 60 секунд по ключу «поставщик + артикул + бренд + аналоги»; одинаковые одновременные запросы делают один вызов поставщику.\n- **Артикул**: разделители и регистр не важны (`K1223A` = `K 1223A`).\n- **Бренд** сопоставляется по алиасам производителей из базы Studio2 (`Kayaba` = `KYB`) и по вариантам написания (`WYNN'S` = `WYNNS`).\n  Для ML-Auto, Микадо и ZZap бренд обязателен.\n- **Аналоги**: по умолчанию только оригиналы запрошенного артикула. Флаг `includeAnalogs` учитывают не все поставщики.\n- **Цены**: `price` — в валюте поставщика, `priceRub` — в рублях по курсу ЦБ РФ (кэш 1 час). Сортировка предложений — по цене, от дешёвых.\n- **Сроки** `deliveryDaysMin/Max`: `0` — товар на складе, `null` — срок не указан.\n- **Остаток**: `stock` — число (если удалось разобрать), `stockText` — исходная запись поставщика (`>10`, `под заказ`).\n- **Ограничения по IP**: МоТехС и Микадо работают только с адреса из белого списка клиента.\n- **ZZap**: не чаще 1 запроса в 3,5 с на весь ключ, поэтому отвечает по очереди; его подпись источника (`priceNote`) нужно показывать пользователю.\n\n## Поставщики\n\n| Ключ | Валюта | Бренд обязателен | Аналоги | Доступ по IP | Протокол |\n|---|---|---|---|---|---|\n| `Armtek` | RUB | нет | да | — | REST (form-urlencoded, конверт STATUS/MESSAGES/RESP) |\n| `ArmtekBy` | BYN | нет | да | — | REST (form-urlencoded, конверт STATUS/MESSAGES/RESP) |\n| `Avd` | RUB | нет | нет | — | SOAP 1.1 |\n| `Berg` | RUB | нет | да | — | REST v1.0 (JSON) |\n| `FavoritParts` | RUB | нет | да | — | REST (JSON) |\n| `FavoritPartsIstra` | RUB | нет | да | — | REST (JSON) |\n| `FavoritPartsRostov` | RUB | нет | да | — | REST (JSON) |\n| `ForumAuto` | RUB | нет | да | — | REST v2 (JSON) |\n| `ForumAutoInterparts` | RUB | нет | да | — | REST v2 (JSON) |\n| `ForumAutoIstra` | RUB | нет | да | — | REST v2 (JSON) |\n| `ForumAutoPiter` | RUB | нет | да | — | REST v2 (JSON) |\n| `ForumAutoRostov` | RUB | нет | да | — | REST v2 (JSON) |\n| `Japarts` | RUB | нет | нет | — | HTTP GET (JSON, windows-1251) |\n| `MikadoMskHod20` | RUB | да | нет | белый список | SOAP 1.1 (ASMX) |\n| `MlAuto` | BYN | да | нет | — | REST (form-urlencoded) |\n| `MlAutoRu` | RUB | да | нет | — | REST (form-urlencoded) |\n| `MoskvorechieIstra` | RUB | нет | нет | — | HTML-портал (cookie, windows-1251) и запасной JSON API |\n| `Motex` | BYN | нет | нет | белый список | REST (JSON, конверт status/messages/response) |\n| `Nikei` | RUB | нет | нет | — | REST (JSON) |\n| `ProfitLiga` | RUB | нет | нет | — | REST v1.4 (JSON) |\n| `ShateM` | BYN | нет | да | — | REST (JSON) |\n| `ZZapMoscow` | RUB | да | нет | — | REST (JSON) |\n\nПодробности по каждому — в ответе `GET /api/quotations/providers` (поля `notes`, `docsUrl`, `rateLimit`).\n",
+    "contact": {
+      "name": "Supplier-Quotation-Api на GitHub",
+      "url": "https://github.com/EvgeniBondarev/Supplier-Quotation-Api"
+    },
+    "version": "v1"
+  },
+  "paths": {
+    "/api/quotations/providers": {
+      "get": {
+        "tags": [
+          "Поставщики"
+        ],
+        "summary": "Подключённые поставщики и их особенности.",
+        "description": "Для каждого поставщика: ключ для поля `providers`, включён ли он (заполнены ли настройки в `.env`), логин учётной записи,\r\nлоготип, а также его паспорт — протокол, способ авторизации, валюта, обязателен ли бренд, поддерживаются ли аналоги,\r\nограничения по IP и частоте запросов и заметки, важные для клиента.\r\n            \r\nВыключенные поставщики в проценке по умолчанию не участвуют. Секреты в ответе не раскрываются.",
+        "responses": {
+          "200": {
+            "description": "Список поставщиков.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ProviderInfo"
+                  }
+                },
+                "examples": {
+                  "list": {
+                    "summary": "Список поставщиков",
+                    "description": "Паспорт каждого: протокол, валюта, обязательность бренда, ограничения.",
+                    "value": [
+                      {
+                        "key": "ShateM",
+                        "name": "Шате-М",
+                        "isEnabled": true,
+                        "accountLogin": "<логин учётной записи>",
+                        "logoUrl": "http://localhost:5099/logos/shatem.svg",
+                        "protocol": "REST (JSON)",
+                        "authentication": "Bearer-токен по логину и паролю",
+                        "currency": "BYN",
+                        "brandRequired": false,
+                        "supportsAnalogs": true,
+                        "ipWhitelist": false,
+                        "rateLimit": null,
+                        "notes": [
+                          "Бренд в поиске артикулов у поставщика обязателен, поэтому сервис ищет по коду (все бренды) и выбирает нужный локально."
+                        ],
+                        "docsUrl": "https://api-doc.shate-m.ru/",
+                        "apiUrl": "https://api.shate-m.by"
+                      },
+                      {
+                        "key": "ZZapMoscow",
+                        "name": "ZZap Москва",
+                        "isEnabled": true,
+                        "accountLogin": "api-key",
+                        "logoUrl": "http://localhost:5099/logos/zzap.svg",
+                        "protocol": "REST (JSON)",
+                        "authentication": "Ключ API в заголовке zzap-api-key",
+                        "currency": "RUB",
+                        "brandRequired": true,
+                        "supportsAnalogs": false,
+                        "ipWhitelist": false,
+                        "rateLimit": "не чаще 1 запроса в 3,5 с на весь ключ",
+                        "notes": [
+                          "Агрегатор продавцов: warehouse — «продавец · точка выдачи»; отдаются 20 самых дешёвых предложений."
+                        ],
+                        "docsUrl": "https://wiki.zzap.ru/category/api-new/",
+                        "apiUrl": "https://b52-api.zzap.pro"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Не передан заголовок `X-Api-Key` или он неверный.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                },
+                "examples": {
+                  "noKey": {
+                    "summary": "Нет или неверен ключ",
+                    "description": "Передайте заголовок `X-Api-Key`.",
+                    "value": {
+                      "title": "Нужен корректный заголовок X-Api-Key.",
+                      "status": 401
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/quotations": {
+      "post": {
+        "tags": [
+          "Проценка"
+        ],
+        "summary": "Проценка артикула у поставщиков одним ответом.",
+        "description": "Опрашивает выбранных (или всех включённых) поставщиков параллельно и возвращает ответ, когда отработали все:\r\nвремя ответа равно времени самого медленного поставщика (таймаут — 20 секунд).\r\n            \r\n**HTTP 200 не означает, что все поставщики ответили.** Ошибка, таймаут или выключенный поставщик приходят внутри\r\n`providers[]` со своим `status` и текстом в `error`, остальные поставщики при этом отдают предложения как обычно.\r\n            \r\nПредложения каждого поставщика отсортированы по цене. По умолчанию возвращаются только оригиналы запрошенного артикула;\r\nкроссы включаются флагом `includeAnalogs` у тех поставщиков, которые его поддерживают.\r\n            \r\nЕсли ответ нужен как можно раньше, используйте `POST /api/quotations/stream`: он отдаёт поставщиков по мере готовности.",
+        "requestBody": {
+          "description": "Артикул, бренд, необязательный список поставщиков и флаг аналогов.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/QuotationRequest"
+                  }
+                ],
+                "description": "Единый запрос проценки: один артикул сразу у нескольких поставщиков.",
+                "example": {
+                  "article": "K1223A",
+                  "brand": "Filtron",
+                  "includeAnalogs": false
+                }
+              },
+              "examples": {
+                "byBrand": {
+                  "summary": "Артикул и бренд, все поставщики",
+                  "description": "Основной сценарий: без `providers` опрашиваются все включённые поставщики.",
+                  "value": {
+                    "article": "K1223A",
+                    "brand": "Filtron",
+                    "includeAnalogs": false
+                  }
+                },
+                "selected": {
+                  "summary": "Выбранные поставщики",
+                  "description": "Бренд `WYNN'S` найдётся и там, где у поставщика он записан как `WYNNS`.",
+                  "value": {
+                    "article": "W28510",
+                    "brand": "WYNN'S",
+                    "providers": [
+                      "ShateM",
+                      "Armtek",
+                      "ZZapMoscow"
+                    ],
+                    "includeAnalogs": false
+                  }
+                },
+                "withAnalogs": {
+                  "summary": "С аналогами",
+                  "description": "Флаг учитывают Шате-М, Армтек, Фаворит (с брендом), Форум-Авто и Берг. Аналоги помечены `providerData.isAnalog`.",
+                  "value": {
+                    "article": "K1223A",
+                    "brand": "Filtron",
+                    "includeAnalogs": true
+                  }
+                },
+                "noBrand": {
+                  "summary": "Без бренда",
+                  "description": "ML-Auto, Микадо и ZZap ответят статусом `Error` «укажите бренд», остальные вернут предложения всех брендов артикула.",
+                  "value": {
+                    "article": "K1223A",
+                    "includeAnalogs": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Ответы всех опрошенных поставщиков. Проверяйте `status` каждого.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotationResponse"
+                },
+                "examples": {
+                  "ok": {
+                    "summary": "Несколько поставщиков с предложениями",
+                    "description": "Каждый поставщик — отдельный элемент `providers`; цены поставщиков в BYN пересчитаны в `priceRub`.",
+                    "value": {
+                      "article": "W28510",
+                      "brand": "WYNN'S",
+                      "requestedAtUtc": "2026-09-29T08:57:39.0000000+00:00",
+                      "durationMs": 3607,
+                      "providers": [
+                        {
+                          "providerKey": "Armtek",
+                          "providerName": "Армтек",
+                          "logoUrl": "http://localhost:5099/logos/armtek.svg",
+                          "accountLogin": "<логин учётной записи>",
+                          "status": "Ok",
+                          "error": null,
+                          "durationMs": 620,
+                          "offers": [
+                            {
+                              "offerId": "13283294|0000137666|260756",
+                              "productName": "WDA-Wynn's Diesel Additive 250 мл комплексная присадка в дизельное топливо",
+                              "brand": "WYNN'S",
+                              "article": "W28510",
+                              "description": null,
+                              "productUrl": null,
+                              "warehouse": "ЦЗ Москва (0000137666)",
+                              "stock": 10,
+                              "stockText": "10",
+                              "minOrderQuantity": 1,
+                              "deliveryDaysMin": 2,
+                              "deliveryDaysMax": 2,
+                              "price": {
+                                "amount": 2283.03,
+                                "currency": "RUB"
+                              },
+                              "priceRub": {
+                                "amount": 2283.03,
+                                "currency": "RUB"
+                              },
+                              "priceNote": null,
+                              "providerData": {
+                                "artId": "13283294",
+                                "keyzak": "0000137666",
+                                "probability": "73",
+                                "returnDays": "14",
+                                "isAnalog": "false"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "providerKey": "ShateM",
+                          "providerName": "Шате-М",
+                          "logoUrl": "http://localhost:5099/logos/shatem.svg",
+                          "accountLogin": "<логин учётной записи>",
+                          "status": "Ok",
+                          "error": null,
+                          "durationMs": 1733,
+                          "offers": [
+                            {
+                              "offerId": "035C2148256848A9336DCAFF21E9FAA6…",
+                              "productName": "Присадка в топливо (дизель)",
+                              "brand": "WYNNS",
+                              "article": "W28510",
+                              "description": "Присадка для дизельного топлива WYNNS DIESEL ADDITIVE 250мл.",
+                              "productUrl": null,
+                              "warehouse": "Привольный (Центральный склад Привольный)",
+                              "stock": 8,
+                              "stockText": "8",
+                              "minOrderQuantity": 1,
+                              "deliveryDaysMin": 2,
+                              "deliveryDaysMax": 2,
+                              "price": {
+                                "amount": 82.62,
+                                "currency": "BYN"
+                              },
+                              "priceRub": {
+                                "amount": 2304.84,
+                                "currency": "RUB"
+                              },
+                              "priceNote": "Возврат невозможен. Для подбора запчастей рекомендуем использовать каталоги производителей.",
+                              "providerData": {
+                                "articleId": "242434472",
+                                "locationCode": "SHATE-S01",
+                                "agreementCode": "<код договора>",
+                                "priceHash": "1661401022",
+                                "multiplicity": "1",
+                                "supplyRating": "0"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "providerKey": "ZZapMoscow",
+                          "providerName": "ZZap Москва",
+                          "logoUrl": "http://localhost:5099/logos/zzap.svg",
+                          "accountLogin": "api-key",
+                          "status": "Ok",
+                          "error": null,
+                          "durationMs": 3607,
+                          "offers": [
+                            {
+                              "offerId": "1240683544109553744",
+                              "productName": "Присадка в топливо дизельная 250 мл",
+                              "brand": "WYNNS",
+                              "article": "W28510",
+                              "description": null,
+                              "productUrl": null,
+                              "warehouse": "G-kamion (Коньково) · Москва, м.Коньково",
+                              "stock": 400,
+                              "stockText": "400",
+                              "minOrderQuantity": 1,
+                              "deliveryDaysMin": 7,
+                              "deliveryDaysMax": 7,
+                              "price": {
+                                "amount": 1481,
+                                "currency": "RUB"
+                              },
+                              "priceRub": {
+                                "amount": 1481,
+                                "currency": "RUB"
+                              },
+                              "priceNote": "Самовывоз · Прайс обновлён: 1ч. назад · Информация о запчастях предоставлена системой ZZap",
+                              "providerData": {
+                                "codeDocB": "1240683544109553744",
+                                "sellerName": "G-kamion (Коньково)",
+                                "sellerRating": "4",
+                                "codeRegion": "1",
+                                "minSumOrder": "0",
+                                "pack": "1",
+                                "legalOnly": "false",
+                                "attribution": "Информация о запчастях предоставлена системой ZZap"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  "mixed": {
+                    "summary": "Разные исходы в одном ответе",
+                    "description": "Ошибка, таймаут и выключенный поставщик приходят внутри ответа и не ломают остальных.",
+                    "value": {
+                      "article": "K1223A",
+                      "brand": null,
+                      "requestedAtUtc": "2026-09-29T09:10:02.0000000+00:00",
+                      "durationMs": 20014,
+                      "providers": [
+                        {
+                          "providerKey": "Berg",
+                          "providerName": "Берг",
+                          "logoUrl": "http://localhost:5099/logos/berg.png",
+                          "accountLogin": "api-key",
+                          "status": "NoOffers",
+                          "error": null,
+                          "durationMs": 118,
+                          "offers": []
+                        },
+                        {
+                          "providerKey": "Motex",
+                          "providerName": "МоТехС",
+                          "logoUrl": "http://localhost:5099/logos/motex.png",
+                          "accountLogin": "<логин учётной записи>",
+                          "status": "Error",
+                          "error": "Нет доступа. Проверьте IP адрес.(текущий IP: 203.0.113.10)",
+                          "durationMs": 238,
+                          "offers": []
+                        },
+                        {
+                          "providerKey": "ZZapMoscow",
+                          "providerName": "ZZap Москва",
+                          "logoUrl": "http://localhost:5099/logos/zzap.svg",
+                          "accountLogin": "api-key",
+                          "status": "Error",
+                          "error": "ZZap ищет только по паре артикул + бренд: укажите бренд.",
+                          "durationMs": 17,
+                          "offers": []
+                        },
+                        {
+                          "providerKey": "Nikei",
+                          "providerName": "Nikei",
+                          "logoUrl": "http://localhost:5099/logos/nikei.svg",
+                          "accountLogin": "<логин учётной записи>",
+                          "status": "Timeout",
+                          "error": "Поставщик не ответил за 20 с.",
+                          "durationMs": 20000,
+                          "offers": []
+                        },
+                        {
+                          "providerKey": "Japarts",
+                          "providerName": "Japarts",
+                          "logoUrl": "http://localhost:5099/logos/japarts.jpg",
+                          "accountLogin": "<логин учётной записи>",
+                          "status": "Disabled",
+                          "error": "Поставщик выключен: не заполнены настройки в .env.",
+                          "durationMs": 0,
+                          "offers": []
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Пустой артикул или неизвестный ключ поставщика в `providers`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                },
+                "examples": {
+                  "unknownProvider": {
+                    "summary": "Неизвестный ключ поставщика",
+                    "description": "Допустимые ключи — в `GET /api/quotations/providers`.",
+                    "value": {
+                      "title": "Неизвестные поставщики: Foo, Bar",
+                      "status": 400
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Не передан заголовок `X-Api-Key` или он неверный.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                },
+                "examples": {
+                  "noKey": {
+                    "summary": "Нет или неверен ключ",
+                    "description": "Передайте заголовок `X-Api-Key`.",
+                    "value": {
+                      "title": "Нужен корректный заголовок X-Api-Key.",
+                      "status": 401
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/quotations/stream": {
+      "post": {
+        "tags": [
+          "Проценка"
+        ],
+        "summary": "Та же проценка потоком NDJSON: строка на поставщика, по мере готовности.",
+        "description": "Запрос такой же, как у `POST /api/quotations`. Ответ — `application/x-ndjson`: каждая строка — отдельный JSON-объект\r\n`ProviderQuotation`, строки идут в **порядке готовности** поставщиков, а не по алфавиту. Первые цены приходят через\r\nсотни миллисекунд, не дожидаясь самых медленных поставщиков (например, ZZap отвечает по очереди).\r\n            \r\nСоединение закрывается, когда отработал последний поставщик. Итоговых полей (`durationMs`, `requestedAtUtc`) в потоке нет.\r\nОшибки запроса (`400`, `401`) приходят до начала потока обычным JSON.",
+        "requestBody": {
+          "description": "Артикул, бренд, необязательный список поставщиков и флаг аналогов.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/QuotationRequest"
+                  }
+                ],
+                "description": "Единый запрос проценки: один артикул сразу у нескольких поставщиков.",
+                "example": {
+                  "article": "K1223A",
+                  "brand": "Filtron",
+                  "includeAnalogs": false
+                }
+              },
+              "examples": {
+                "byBrand": {
+                  "summary": "Артикул и бренд, все поставщики",
+                  "description": "Основной сценарий: без `providers` опрашиваются все включённые поставщики.",
+                  "value": {
+                    "article": "K1223A",
+                    "brand": "Filtron",
+                    "includeAnalogs": false
+                  }
+                },
+                "selected": {
+                  "summary": "Выбранные поставщики",
+                  "description": "Бренд `WYNN'S` найдётся и там, где у поставщика он записан как `WYNNS`.",
+                  "value": {
+                    "article": "W28510",
+                    "brand": "WYNN'S",
+                    "providers": [
+                      "ShateM",
+                      "Armtek",
+                      "ZZapMoscow"
+                    ],
+                    "includeAnalogs": false
+                  }
+                },
+                "withAnalogs": {
+                  "summary": "С аналогами",
+                  "description": "Флаг учитывают Шате-М, Армтек, Фаворит (с брендом), Форум-Авто и Берг. Аналоги помечены `providerData.isAnalog`.",
+                  "value": {
+                    "article": "K1223A",
+                    "brand": "Filtron",
+                    "includeAnalogs": true
+                  }
+                },
+                "noBrand": {
+                  "summary": "Без бренда",
+                  "description": "ML-Auto, Микадо и ZZap ответят статусом `Error` «укажите бренд», остальные вернут предложения всех брендов артикула.",
+                  "value": {
+                    "article": "K1223A",
+                    "includeAnalogs": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Поток NDJSON: одна строка JSON на поставщика (объект `ProviderQuotation`), строки идут в порядке готовности. Первые цены приходят через сотни миллисекунд, не дожидаясь самых медленных поставщиков.",
+            "content": {
+              "application/x-ndjson": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderQuotation"
+                },
+                "examples": {
+                  "stream": {
+                    "summary": "Три строки потока",
+                    "description": "Ниже показаны три строки; в реальном ответе каждая — одна строка без переносов внутри.",
+                    "value": "{\"providerKey\":\"Armtek\",\"providerName\":\"\\u0410\\u0440\\u043C\\u0442\\u0435\\u043A\",\"logoUrl\":\"http://localhost:5099/logos/armtek.svg\",\"accountLogin\":\"\\u003C\\u043B\\u043E\\u0433\\u0438\\u043D \\u0443\\u0447\\u0451\\u0442\\u043D\\u043E\\u0439 \\u0437\\u0430\\u043F\\u0438\\u0441\\u0438\\u003E\",\"status\":\"Ok\",\"error\":null,\"durationMs\":620,\"offers\":[{\"offerId\":\"13283294|0000137666|260756\",\"productName\":\"WDA-Wynn\\u0027s Diesel Additive 250 \\u043C\\u043B \\u043A\\u043E\\u043C\\u043F\\u043B\\u0435\\u043A\\u0441\\u043D\\u0430\\u044F \\u043F\\u0440\\u0438\\u0441\\u0430\\u0434\\u043A\\u0430 \\u0432 \\u0434\\u0438\\u0437\\u0435\\u043B\\u044C\\u043D\\u043E\\u0435 \\u0442\\u043E\\u043F\\u043B\\u0438\\u0432\\u043E\",\"brand\":\"WYNN\\u0027S\",\"article\":\"W28510\",\"description\":null,\"productUrl\":null,\"warehouse\":\"\\u0426\\u0417 \\u041C\\u043E\\u0441\\u043A\\u0432\\u0430 (0000137666)\",\"stock\":10,\"stockText\":\"10\",\"minOrderQuantity\":1,\"deliveryDaysMin\":2,\"deliveryDaysMax\":2,\"price\":{\"amount\":2283.03,\"currency\":\"RUB\"},\"priceRub\":{\"amount\":2283.03,\"currency\":\"RUB\"},\"priceNote\":null,\"providerData\":{\"artId\":\"13283294\",\"keyzak\":\"0000137666\",\"probability\":\"73\",\"returnDays\":\"14\",\"isAnalog\":\"false\"}}]}\n{\"providerKey\":\"ShateM\",\"providerName\":\"\\u0428\\u0430\\u0442\\u0435-\\u041C\",\"logoUrl\":\"http://localhost:5099/logos/shatem.svg\",\"accountLogin\":\"\\u003C\\u043B\\u043E\\u0433\\u0438\\u043D \\u0443\\u0447\\u0451\\u0442\\u043D\\u043E\\u0439 \\u0437\\u0430\\u043F\\u0438\\u0441\\u0438\\u003E\",\"status\":\"Ok\",\"error\":null,\"durationMs\":1733,\"offers\":[{\"offerId\":\"035C2148256848A9336DCAFF21E9FAA6\\u2026\",\"productName\":\"\\u041F\\u0440\\u0438\\u0441\\u0430\\u0434\\u043A\\u0430 \\u0432 \\u0442\\u043E\\u043F\\u043B\\u0438\\u0432\\u043E (\\u0434\\u0438\\u0437\\u0435\\u043B\\u044C)\",\"brand\":\"WYNNS\",\"article\":\"W28510\",\"description\":\"\\u041F\\u0440\\u0438\\u0441\\u0430\\u0434\\u043A\\u0430 \\u0434\\u043B\\u044F \\u0434\\u0438\\u0437\\u0435\\u043B\\u044C\\u043D\\u043E\\u0433\\u043E \\u0442\\u043E\\u043F\\u043B\\u0438\\u0432\\u0430 WYNNS DIESEL ADDITIVE 250\\u043C\\u043B.\",\"productUrl\":null,\"warehouse\":\"\\u041F\\u0440\\u0438\\u0432\\u043E\\u043B\\u044C\\u043D\\u044B\\u0439 (\\u0426\\u0435\\u043D\\u0442\\u0440\\u0430\\u043B\\u044C\\u043D\\u044B\\u0439 \\u0441\\u043A\\u043B\\u0430\\u0434 \\u041F\\u0440\\u0438\\u0432\\u043E\\u043B\\u044C\\u043D\\u044B\\u0439)\",\"stock\":8,\"stockText\":\"8\",\"minOrderQuantity\":1,\"deliveryDaysMin\":2,\"deliveryDaysMax\":2,\"price\":{\"amount\":82.62,\"currency\":\"BYN\"},\"priceRub\":{\"amount\":2304.84,\"currency\":\"RUB\"},\"priceNote\":\"\\u0412\\u043E\\u0437\\u0432\\u0440\\u0430\\u0442 \\u043D\\u0435\\u0432\\u043E\\u0437\\u043C\\u043E\\u0436\\u0435\\u043D. \\u0414\\u043B\\u044F \\u043F\\u043E\\u0434\\u0431\\u043E\\u0440\\u0430 \\u0437\\u0430\\u043F\\u0447\\u0430\\u0441\\u0442\\u0435\\u0439 \\u0440\\u0435\\u043A\\u043E\\u043C\\u0435\\u043D\\u0434\\u0443\\u0435\\u043C \\u0438\\u0441\\u043F\\u043E\\u043B\\u044C\\u0437\\u043E\\u0432\\u0430\\u0442\\u044C \\u043A\\u0430\\u0442\\u0430\\u043B\\u043E\\u0433\\u0438 \\u043F\\u0440\\u043E\\u0438\\u0437\\u0432\\u043E\\u0434\\u0438\\u0442\\u0435\\u043B\\u0435\\u0439.\",\"providerData\":{\"articleId\":\"242434472\",\"locationCode\":\"SHATE-S01\",\"agreementCode\":\"\\u003C\\u043A\\u043E\\u0434 \\u0434\\u043E\\u0433\\u043E\\u0432\\u043E\\u0440\\u0430\\u003E\",\"priceHash\":\"1661401022\",\"multiplicity\":\"1\",\"supplyRating\":\"0\"}}]}\n{\"providerKey\":\"ZZapMoscow\",\"providerName\":\"ZZap \\u041C\\u043E\\u0441\\u043A\\u0432\\u0430\",\"logoUrl\":\"http://localhost:5099/logos/zzap.svg\",\"accountLogin\":\"api-key\",\"status\":\"Ok\",\"error\":null,\"durationMs\":3607,\"offers\":[{\"offerId\":\"1240683544109553744\",\"productName\":\"\\u041F\\u0440\\u0438\\u0441\\u0430\\u0434\\u043A\\u0430 \\u0432 \\u0442\\u043E\\u043F\\u043B\\u0438\\u0432\\u043E \\u0434\\u0438\\u0437\\u0435\\u043B\\u044C\\u043D\\u0430\\u044F 250 \\u043C\\u043B\",\"brand\":\"WYNNS\",\"article\":\"W28510\",\"description\":null,\"productUrl\":null,\"warehouse\":\"G-kamion (\\u041A\\u043E\\u043D\\u044C\\u043A\\u043E\\u0432\\u043E) \\u00B7 \\u041C\\u043E\\u0441\\u043A\\u0432\\u0430, \\u043C.\\u041A\\u043E\\u043D\\u044C\\u043A\\u043E\\u0432\\u043E\",\"stock\":400,\"stockText\":\"400\",\"minOrderQuantity\":1,\"deliveryDaysMin\":7,\"deliveryDaysMax\":7,\"price\":{\"amount\":1481,\"currency\":\"RUB\"},\"priceRub\":{\"amount\":1481,\"currency\":\"RUB\"},\"priceNote\":\"\\u0421\\u0430\\u043C\\u043E\\u0432\\u044B\\u0432\\u043E\\u0437 \\u00B7 \\u041F\\u0440\\u0430\\u0439\\u0441 \\u043E\\u0431\\u043D\\u043E\\u0432\\u043B\\u0451\\u043D: 1\\u0447. \\u043D\\u0430\\u0437\\u0430\\u0434 \\u00B7 \\u0418\\u043D\\u0444\\u043E\\u0440\\u043C\\u0430\\u0446\\u0438\\u044F \\u043E \\u0437\\u0430\\u043F\\u0447\\u0430\\u0441\\u0442\\u044F\\u0445 \\u043F\\u0440\\u0435\\u0434\\u043E\\u0441\\u0442\\u0430\\u0432\\u043B\\u0435\\u043D\\u0430 \\u0441\\u0438\\u0441\\u0442\\u0435\\u043C\\u043E\\u0439 ZZap\",\"providerData\":{\"codeDocB\":\"1240683544109553744\",\"sellerName\":\"G-kamion (\\u041A\\u043E\\u043D\\u044C\\u043A\\u043E\\u0432\\u043E)\",\"sellerRating\":\"4\",\"codeRegion\":\"1\",\"minSumOrder\":\"0\",\"pack\":\"1\",\"legalOnly\":\"false\",\"attribution\":\"\\u0418\\u043D\\u0444\\u043E\\u0440\\u043C\\u0430\\u0446\\u0438\\u044F \\u043E \\u0437\\u0430\\u043F\\u0447\\u0430\\u0441\\u0442\\u044F\\u0445 \\u043F\\u0440\\u0435\\u0434\\u043E\\u0441\\u0442\\u0430\\u0432\\u043B\\u0435\\u043D\\u0430 \\u0441\\u0438\\u0441\\u0442\\u0435\\u043C\\u043E\\u0439 ZZap\"}}]}"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Пустой артикул или неизвестный ключ поставщика в `providers`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                },
+                "examples": {
+                  "unknownProvider": {
+                    "summary": "Неизвестный ключ поставщика",
+                    "description": "Допустимые ключи — в `GET /api/quotations/providers`.",
+                    "value": {
+                      "title": "Неизвестные поставщики: Foo, Bar",
+                      "status": 400
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Не передан заголовок `X-Api-Key` или он неверный.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                },
+                "examples": {
+                  "noKey": {
+                    "summary": "Нет или неверен ключ",
+                    "description": "Передайте заголовок `X-Api-Key`.",
+                    "value": {
+                      "title": "Нужен корректный заголовок X-Api-Key.",
+                      "status": 401
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Money": {
+        "type": "object",
+        "properties": {
+          "amount": {
+            "type": "number",
+            "description": "Сумма за единицу товара.",
+            "format": "double"
+          },
+          "currency": {
+            "type": "string",
+            "description": "Код валюты: RUB, BYN."
+          }
+        },
+        "additionalProperties": false,
+        "description": "Денежная сумма.",
+        "example": {
+          "amount": 82.62,
+          "currency": "BYN"
+        }
+      },
+      "ProblemDetails": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "nullable": true
+          },
+          "title": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "detail": {
+            "type": "string",
+            "nullable": true
+          },
+          "instance": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": {}
+      },
+      "ProviderInfo": {
+        "required": [
+          "isEnabled",
+          "key",
+          "name"
+        ],
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "Ключ для поля `providers` запроса."
+          },
+          "name": {
+            "type": "string",
+            "description": "Название для показа."
+          },
+          "isEnabled": {
+            "type": "boolean",
+            "description": "`true` — настройки заполнены, поставщик участвует в проценке по умолчанию."
+          },
+          "accountLogin": {
+            "type": "string",
+            "description": "Логин учётной записи, под которой идут запросы (для API без логина — метка).",
+            "nullable": true
+          },
+          "logoUrl": {
+            "type": "string",
+            "description": "Ссылка на логотип.",
+            "nullable": true
+          },
+          "protocol": {
+            "type": "string",
+            "description": "Транспорт и формат API поставщика.",
+            "nullable": true
+          },
+          "authentication": {
+            "type": "string",
+            "description": "Способ авторизации сервиса у поставщика.",
+            "nullable": true
+          },
+          "currency": {
+            "type": "string",
+            "description": "Валюта цен поставщика (`price.currency` в предложениях).",
+            "nullable": true
+          },
+          "brandRequired": {
+            "type": "boolean",
+            "description": "Без бренда поставщик возвращает статус `Error`."
+          },
+          "supportsAnalogs": {
+            "type": "boolean",
+            "description": "Учитывает `includeAnalogs`; иначе всегда только оригиналы."
+          },
+          "ipWhitelist": {
+            "type": "boolean",
+            "description": "Доступ ограничен по IP клиента на стороне поставщика."
+          },
+          "rateLimit": {
+            "type": "string",
+            "description": "Ограничение частоты запросов, если есть.",
+            "nullable": true
+          },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Особенности, важные для клиента."
+          },
+          "docsUrl": {
+            "type": "string",
+            "description": "Официальная документация поставщика, если ссылка известна.",
+            "nullable": true
+          },
+          "apiUrl": {
+            "type": "string",
+            "description": "Адрес API поставщика.",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false,
+        "description": "Поставщик и его особенности: как устроен API и что нужно учитывать клиенту.",
+        "example": {
+          "key": "ShateM",
+          "name": "Шате-М",
+          "isEnabled": true,
+          "accountLogin": "<логин учётной записи>",
+          "logoUrl": "http://localhost:5099/logos/shatem.svg",
+          "protocol": "REST (JSON)",
+          "authentication": "Bearer-токен по логину и паролю",
+          "currency": "BYN",
+          "brandRequired": false,
+          "supportsAnalogs": true,
+          "ipWhitelist": false,
+          "rateLimit": null,
+          "notes": [
+            "Бренд в поиске артикулов у поставщика обязателен, поэтому сервис ищет по коду (все бренды) и выбирает нужный локально."
+          ],
+          "docsUrl": "https://api-doc.shate-m.ru/",
+          "apiUrl": "https://api.shate-m.by"
+        }
+      },
+      "ProviderQuotation": {
+        "required": [
+          "durationMs",
+          "offers",
+          "providerKey",
+          "providerName",
+          "status"
+        ],
+        "type": "object",
+        "properties": {
+          "providerKey": {
+            "type": "string",
+            "description": "Стабильный ключ поставщика для поля `providers` запроса."
+          },
+          "providerName": {
+            "type": "string",
+            "description": "Название для показа пользователю."
+          },
+          "logoUrl": {
+            "type": "string",
+            "description": "Ссылка на логотип: файл этого сервиса (`/logos/…`) или адрес на сайте поставщика.",
+            "nullable": true
+          },
+          "accountLogin": {
+            "type": "string",
+            "description": "Логин учётной записи, под которой выполнена проценка. Для API без логина — метка `api-key` или начало ключа\r\n(сам секрет не раскрывается).",
+            "nullable": true
+          },
+          "status": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/QuotationStatus"
+              }
+            ],
+            "description": "Итог опроса одного поставщика:\n\n- `Ok` — Есть хотя бы одно предложение.\n- `NoOffers` — Запрос выполнен, предложений нет.\n- `Error` — Ошибка поставщика или запроса; причина в поле `error` (нет доступа, нужен бренд, превышена квота и т. д.).\n- `Disabled` — Поставщика запросили явно, но его настройки не заполнены.\n- `Timeout` — Поставщик не ответил за отведённое время (по умолчанию 20 с).",
+            "x-enumDescriptions": {
+              "Ok": "Есть хотя бы одно предложение.",
+              "NoOffers": "Запрос выполнен, предложений нет.",
+              "Error": "Ошибка поставщика или запроса; причина в поле `error` (нет доступа, нужен бренд, превышена квота и т. д.).",
+              "Disabled": "Поставщика запросили явно, но его настройки не заполнены.",
+              "Timeout": "Поставщик не ответил за отведённое время (по умолчанию 20 с)."
+            }
+          },
+          "error": {
+            "type": "string",
+            "description": "Причина при статусах `Error`, `Timeout`, `Disabled`: текст для пользователя.",
+            "nullable": true
+          },
+          "durationMs": {
+            "type": "integer",
+            "description": "Время ответа этого поставщика, мс. Из кэша — близко к нулю.",
+            "format": "int64"
+          },
+          "offers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QuotationOffer"
+            },
+            "description": "Предложения, от дешёвых к дорогим. Пусто при любом статусе, кроме `Ok`."
+          }
+        },
+        "additionalProperties": false,
+        "description": "Результат одного поставщика: статус, время ответа и предложения.",
+        "example": {
+          "providerKey": "Armtek",
+          "providerName": "Армтек",
+          "logoUrl": "http://localhost:5099/logos/armtek.svg",
+          "accountLogin": "<логин учётной записи>",
+          "status": "Ok",
+          "error": null,
+          "durationMs": 620,
+          "offers": [
+            {
+              "offerId": "13283294|0000137666|260756",
+              "productName": "WDA-Wynn's Diesel Additive 250 мл комплексная присадка в дизельное топливо",
+              "brand": "WYNN'S",
+              "article": "W28510",
+              "description": null,
+              "productUrl": null,
+              "warehouse": "ЦЗ Москва (0000137666)",
+              "stock": 10,
+              "stockText": "10",
+              "minOrderQuantity": 1,
+              "deliveryDaysMin": 2,
+              "deliveryDaysMax": 2,
+              "price": {
+                "amount": 2283.03,
+                "currency": "RUB"
+              },
+              "priceRub": {
+                "amount": 2283.03,
+                "currency": "RUB"
+              },
+              "priceNote": null,
+              "providerData": {
+                "artId": "13283294",
+                "keyzak": "0000137666",
+                "probability": "73",
+                "returnDays": "14",
+                "isAnalog": "false"
+              }
+            }
+          ]
+        }
+      },
+      "QuotationOffer": {
+        "required": [
+          "price"
+        ],
+        "type": "object",
+        "properties": {
+          "offerId": {
+            "type": "string",
+            "description": "Стабильный идентификатор предложения у поставщика: нужен для заказа и корзины. Формат зависит от поставщика.",
+            "nullable": true
+          },
+          "productName": {
+            "type": "string",
+            "description": "Наименование товара так, как его назвал поставщик.",
+            "nullable": true
+          },
+          "brand": {
+            "type": "string",
+            "description": "Производитель в написании поставщика (может отличаться от запрошенного: `FEBI BILSTEIN` при запросе `Febi`).",
+            "nullable": true
+          },
+          "article": {
+            "type": "string",
+            "description": "Артикул в написании поставщика (`K 1223A` при запросе `K1223A`).",
+            "nullable": true
+          },
+          "description": {
+            "type": "string",
+            "description": "Описание товара, если поставщик его отдаёт.",
+            "nullable": true
+          },
+          "productUrl": {
+            "type": "string",
+            "description": "Ссылка на страницу товара; у большинства поставщиков её нет.",
+            "nullable": true
+          },
+          "warehouse": {
+            "type": "string",
+            "description": "Склад или направление поставки в читаемом виде. У агрегаторов (АВД, ZZap) это поставщик-продавец и точка выдачи:\r\n`LAA (Москва)`, `ИП Левков · Королев`.",
+            "nullable": true
+          },
+          "stock": {
+            "type": "integer",
+            "description": "Остаток числом. `null` — количество скрыто или не удалось разобрать; исходный текст в SupplierQuotationApi.Contracts.QuotationOffer.StockText.",
+            "format": "int32",
+            "nullable": true
+          },
+          "stockText": {
+            "type": "string",
+            "description": "Остаток в исходном виде поставщика: `>10` («не менее»), `под заказ`, `Заказ`.",
+            "nullable": true
+          },
+          "minOrderQuantity": {
+            "type": "integer",
+            "description": "Кратность заказа: количество должно делиться на это число. По умолчанию 1.",
+            "format": "int32"
+          },
+          "deliveryDaysMin": {
+            "type": "integer",
+            "description": "Срок доставки, дней (нижняя граница). `null` — не указан. `0` — товар на складе.",
+            "format": "int32",
+            "nullable": true
+          },
+          "deliveryDaysMax": {
+            "type": "integer",
+            "description": "Срок доставки, дней (верхняя граница). Не меньше SupplierQuotationApi.Contracts.QuotationOffer.DeliveryDaysMin.",
+            "format": "int32",
+            "nullable": true
+          },
+          "price": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              }
+            ],
+            "description": "Цена закупки за единицу в валюте поставщика (`currency` внутри).",
+            "example": {
+              "amount": 82.62,
+              "currency": "BYN"
+            }
+          },
+          "priceRub": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              }
+            ],
+            "description": "Цена за единицу в рублях по курсу ЦБ РФ. Для рублёвых поставщиков совпадает с SupplierQuotationApi.Contracts.QuotationOffer.Price. `null` — курс неизвестен.",
+            "nullable": true,
+            "example": {
+              "amount": 82.62,
+              "currency": "BYN"
+            }
+          },
+          "priceNote": {
+            "type": "string",
+            "description": "Условия предложения: возврат, минимальная сумма заказа, ограничения продавца, подпись источника.\r\nУ ZZap содержит обязательную подпись «Информация о запчастях предоставлена системой ZZap» — её нужно показывать пользователю.",
+            "nullable": true
+          },
+          "providerData": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Служебные данные точного предложения для последующего заказа: склад, коды, токены корзины, признаки (`isAnalog`).\r\nНабор ключей зависит от поставщика; значения — строки. Секретов внутри нет.",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false,
+        "description": "Единое ценовое предложение поставщика. Структура одна для всех поставщиков независимо от их API.\n\nПоля `price` и `priceRub` — цена за единицу. `stock` и `deliveryDays*` могут быть `null`: значение не указано поставщиком."
+      },
+      "QuotationRequest": {
+        "required": [
+          "article"
+        ],
+        "type": "object",
+        "properties": {
+          "article": {
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string",
+            "description": "Артикул детали. Разделители и регистр значения не имеют: `K1223A`, `K 1223A` и `k-1223a` — один и тот же артикул.",
+            "example": "K1223A"
+          },
+          "brand": {
+            "maxLength": 100,
+            "minLength": 0,
+            "type": "string",
+            "description": "Производитель. Написание может отличаться от каталога поставщика (`Kayaba` и `KYB`, `WYNN'S` и `WYNNS`):\r\nсервис приводит его сам по алиасам и вариантам написания.\r\n\n<b>Обязателен</b> для ML-Auto (BY и RU), Микадо и ZZap: без бренда они возвращают статус `Error`.\r\nОстальные без бренда отдают предложения всех брендов артикула.",
+            "nullable": true,
+            "example": "Filtron"
+          },
+          "providers": {
+            "type": "array",
+            "items": {
+              "enum": [
+                "Armtek",
+                "ArmtekBy",
+                "Avd",
+                "Berg",
+                "FavoritParts",
+                "FavoritPartsIstra",
+                "FavoritPartsRostov",
+                "ForumAuto",
+                "ForumAutoInterparts",
+                "ForumAutoIstra",
+                "ForumAutoPiter",
+                "ForumAutoRostov",
+                "Japarts",
+                "MikadoMskHod20",
+                "MlAuto",
+                "MlAutoRu",
+                "MoskvorechieIstra",
+                "Motex",
+                "Nikei",
+                "ProfitLiga",
+                "ShateM",
+                "ZZapMoscow"
+              ],
+              "type": "string"
+            },
+            "description": "Ключи поставщиков (см. `GET /api/quotations/providers`). Пусто или не указано — опрашиваются все включённые.\r\nЕсли указан выключенный поставщик (не заполнены его настройки), он вернётся со статусом `Disabled`.\r\nНеизвестный ключ — ответ `400`.",
+            "nullable": true
+          },
+          "includeAnalogs": {
+            "type": "boolean",
+            "description": "Включать кроссы и аналоги. По умолчанию только оригиналы запрошенного артикула.\r\nФлаг учитывают Шате-М, Армтек, Фаворит (только вместе с брендом), Форум-Авто и Берг; остальные всегда отдают только оригиналы\r\n(`supportsAnalogs` в списке поставщиков). Аналоги помечены `providerData.isAnalog = \"true\"`.",
+            "example": false
+          }
+        },
+        "additionalProperties": false,
+        "description": "Единый запрос проценки: один артикул сразу у нескольких поставщиков.",
+        "example": {
+          "article": "K1223A",
+          "brand": "Filtron",
+          "includeAnalogs": false
+        }
+      },
+      "QuotationResponse": {
+        "required": [
+          "article",
+          "durationMs",
+          "providers",
+          "requestedAtUtc"
+        ],
+        "type": "object",
+        "properties": {
+          "article": {
+            "type": "string",
+            "description": "Артикул из запроса (без пробелов по краям)."
+          },
+          "brand": {
+            "type": "string",
+            "description": "Бренд из запроса, если был указан.",
+            "nullable": true
+          },
+          "requestedAtUtc": {
+            "type": "string",
+            "description": "Момент начала обработки запроса, UTC.",
+            "format": "date-time"
+          },
+          "durationMs": {
+            "type": "integer",
+            "description": "Полное время обработки, мс. Равно времени самого медленного поставщика, а не сумме.",
+            "format": "int64"
+          },
+          "providers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProviderQuotation"
+            },
+            "description": "Ответы поставщиков, отсортированные по названию. Ошибка одного не ломает остальных."
+          }
+        },
+        "additionalProperties": false,
+        "description": "Результат проценки: ответы всех опрошенных поставщиков.",
+        "example": {
+          "article": "W28510",
+          "brand": "WYNN'S",
+          "requestedAtUtc": "2026-09-29T08:57:39.0000000+00:00",
+          "durationMs": 3607,
+          "providers": [
+            {
+              "providerKey": "Armtek",
+              "providerName": "Армтек",
+              "logoUrl": "http://localhost:5099/logos/armtek.svg",
+              "accountLogin": "<логин учётной записи>",
+              "status": "Ok",
+              "error": null,
+              "durationMs": 620,
+              "offers": [
+                {
+                  "offerId": "13283294|0000137666|260756",
+                  "productName": "WDA-Wynn's Diesel Additive 250 мл комплексная присадка в дизельное топливо",
+                  "brand": "WYNN'S",
+                  "article": "W28510",
+                  "description": null,
+                  "productUrl": null,
+                  "warehouse": "ЦЗ Москва (0000137666)",
+                  "stock": 10,
+                  "stockText": "10",
+                  "minOrderQuantity": 1,
+                  "deliveryDaysMin": 2,
+                  "deliveryDaysMax": 2,
+                  "price": {
+                    "amount": 2283.03,
+                    "currency": "RUB"
+                  },
+                  "priceRub": {
+                    "amount": 2283.03,
+                    "currency": "RUB"
+                  },
+                  "priceNote": null,
+                  "providerData": {
+                    "artId": "13283294",
+                    "keyzak": "0000137666",
+                    "probability": "73",
+                    "returnDays": "14",
+                    "isAnalog": "false"
+                  }
+                }
+              ]
+            },
+            {
+              "providerKey": "ShateM",
+              "providerName": "Шате-М",
+              "logoUrl": "http://localhost:5099/logos/shatem.svg",
+              "accountLogin": "<логин учётной записи>",
+              "status": "Ok",
+              "error": null,
+              "durationMs": 1733,
+              "offers": [
+                {
+                  "offerId": "035C2148256848A9336DCAFF21E9FAA6…",
+                  "productName": "Присадка в топливо (дизель)",
+                  "brand": "WYNNS",
+                  "article": "W28510",
+                  "description": "Присадка для дизельного топлива WYNNS DIESEL ADDITIVE 250мл.",
+                  "productUrl": null,
+                  "warehouse": "Привольный (Центральный склад Привольный)",
+                  "stock": 8,
+                  "stockText": "8",
+                  "minOrderQuantity": 1,
+                  "deliveryDaysMin": 2,
+                  "deliveryDaysMax": 2,
+                  "price": {
+                    "amount": 82.62,
+                    "currency": "BYN"
+                  },
+                  "priceRub": {
+                    "amount": 2304.84,
+                    "currency": "RUB"
+                  },
+                  "priceNote": "Возврат невозможен. Для подбора запчастей рекомендуем использовать каталоги производителей.",
+                  "providerData": {
+                    "articleId": "242434472",
+                    "locationCode": "SHATE-S01",
+                    "agreementCode": "<код договора>",
+                    "priceHash": "1661401022",
+                    "multiplicity": "1",
+                    "supplyRating": "0"
+                  }
+                }
+              ]
+            },
+            {
+              "providerKey": "ZZapMoscow",
+              "providerName": "ZZap Москва",
+              "logoUrl": "http://localhost:5099/logos/zzap.svg",
+              "accountLogin": "api-key",
+              "status": "Ok",
+              "error": null,
+              "durationMs": 3607,
+              "offers": [
+                {
+                  "offerId": "1240683544109553744",
+                  "productName": "Присадка в топливо дизельная 250 мл",
+                  "brand": "WYNNS",
+                  "article": "W28510",
+                  "description": null,
+                  "productUrl": null,
+                  "warehouse": "G-kamion (Коньково) · Москва, м.Коньково",
+                  "stock": 400,
+                  "stockText": "400",
+                  "minOrderQuantity": 1,
+                  "deliveryDaysMin": 7,
+                  "deliveryDaysMax": 7,
+                  "price": {
+                    "amount": 1481,
+                    "currency": "RUB"
+                  },
+                  "priceRub": {
+                    "amount": 1481,
+                    "currency": "RUB"
+                  },
+                  "priceNote": "Самовывоз · Прайс обновлён: 1ч. назад · Информация о запчастях предоставлена системой ZZap",
+                  "providerData": {
+                    "codeDocB": "1240683544109553744",
+                    "sellerName": "G-kamion (Коньково)",
+                    "sellerRating": "4",
+                    "codeRegion": "1",
+                    "minSumOrder": "0",
+                    "pack": "1",
+                    "legalOnly": "false",
+                    "attribution": "Информация о запчастях предоставлена системой ZZap"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "QuotationStatus": {
+        "enum": [
+          "Ok",
+          "NoOffers",
+          "Error",
+          "Disabled",
+          "Timeout"
+        ],
+        "type": "string",
+        "description": "Итог опроса одного поставщика:\n\n- `Ok` — Есть хотя бы одно предложение.\n- `NoOffers` — Запрос выполнен, предложений нет.\n- `Error` — Ошибка поставщика или запроса; причина в поле `error` (нет доступа, нужен бренд, превышена квота и т. д.).\n- `Disabled` — Поставщика запросили явно, но его настройки не заполнены.\n- `Timeout` — Поставщик не ответил за отведённое время (по умолчанию 20 с).",
+        "x-enumDescriptions": {
+          "Ok": "Есть хотя бы одно предложение.",
+          "NoOffers": "Запрос выполнен, предложений нет.",
+          "Error": "Ошибка поставщика или запроса; причина в поле `error` (нет доступа, нужен бренд, превышена квота и т. д.).",
+          "Disabled": "Поставщика запросили явно, но его настройки не заполнены.",
+          "Timeout": "Поставщик не ответил за отведённое время (по умолчанию 20 с)."
+        }
+      }
+    },
+    "securitySchemes": {
+      "ApiKey": {
+        "type": "apiKey",
+        "description": "Ключ клиента сервиса (`APP__APIKEY` в `.env`). Без него все методы отвечают `401`. Нажмите **Authorize**, чтобы Swagger UI подставлял его в запросы.",
+        "name": "X-Api-Key",
+        "in": "header"
+      }
+    }
+  },
+  "security": [
+    {
+      "ApiKey": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Проценка",
+      "description": "Проценка артикула у поставщиков. Один запрос — ответы всех поставщиков в единой структуре."
+    },
+    {
+      "name": "Поставщики",
+      "description": "Справочник подключённых поставщиков: включён ли, какой у него API, что нужно учитывать клиенту."
+    }
+  ]
+}
