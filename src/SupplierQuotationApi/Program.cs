@@ -7,7 +7,10 @@ using SupplierQuotationApi.Providers.Avd;
 using SupplierQuotationApi.Providers.Berg;
 using SupplierQuotationApi.Providers.MlAuto;
 using SupplierQuotationApi.Providers.Moskvorechie;
+using SupplierQuotationApi.Providers.Japarts;
 using SupplierQuotationApi.Providers.Motex;
+using SupplierQuotationApi.Providers.Nikei;
+using SupplierQuotationApi.Providers.ProfitLiga;
 using SupplierQuotationApi.Providers.FavoritParts;
 using SupplierQuotationApi.Providers.ForumAuto;
 using SupplierQuotationApi.Providers.ShateM;
@@ -48,6 +51,9 @@ builder.Services.AddBerg(builder.Configuration);
 builder.Services.AddMotex(builder.Configuration);
 builder.Services.AddMlAuto(builder.Configuration);
 builder.Services.AddMoskvorechie(builder.Configuration);
+builder.Services.AddProfitLiga(builder.Configuration);
+builder.Services.AddJaparts(builder.Configuration);
+builder.Services.AddNikei(builder.Configuration);
 
 var app = builder.Build();
 
